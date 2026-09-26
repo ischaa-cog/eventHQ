@@ -15,16 +15,17 @@ export const sessions = pgTable(
 );
 
 // User storage table with RBAC fields
-// Roles: owner (super admin), agency_admin (sees their agency), agency_employee (assigned clients only), agency_client (limited view)
+// Visible profiles: Admin (owner/agency_admin) and Client (agency_client).
+// Legacy agency_employee rows are retained but disabled; no new employee accounts.
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: varchar("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: varchar("role").default("agency_employee"), // owner, agency_admin, agency_employee, agency_client
+  role: varchar("role").default("agency_employee"), // default is fail-closed for uninvited users
   agencyId: integer("agency_id"),
-  clientAccess: integer("client_access").array(), // array of client IDs for agency_employee/agency_client roles
+  clientAccess: integer("client_access").array(), // assigned client for client accounts
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

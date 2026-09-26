@@ -41,7 +41,7 @@ export default function AdminPage() {
   const [agencyName, setAgencyName] = useState("");
   const [agencyDefaultLanguage, setAgencyDefaultLanguage] = useState("");
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [inviteRole, setInviteRole] = useState("agency_employee");
+  const [inviteRole, setInviteRole] = useState("agency_client");
   const [inviteAgency, setInviteAgency] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteClients, setInviteClients] = useState<number[]>([]);
@@ -236,7 +236,7 @@ export default function AdminPage() {
       role: inviteRole,
       agencyId: inviteAgency ? parseInt(inviteAgency) : undefined,
       email: inviteEmail || undefined,
-      clientAccess: (inviteRole === "agency_employee" || inviteRole === "agency_client") ? inviteClients : undefined,
+      clientAccess: inviteRole === "agency_client" ? inviteClients : undefined,
     });
   };
 
@@ -246,7 +246,7 @@ export default function AdminPage() {
   };
 
   const resetInviteForm = () => {
-    setInviteRole("agency_employee");
+    setInviteRole("agency_client");
     setInviteAgency("");
     setInviteEmail("");
     setInviteClients([]);
@@ -254,11 +254,7 @@ export default function AdminPage() {
   };
 
   const toggleInviteClient = (clientId: number) => {
-    setInviteClients(prev => 
-      prev.includes(clientId) 
-        ? prev.filter(id => id !== clientId)
-        : [...prev, clientId]
-    );
+    setInviteClients(prev => prev.includes(clientId) ? [] : [clientId]);
   };
 
   const updateAgencyMutation = useMutation({
@@ -335,7 +331,7 @@ export default function AdminPage() {
 
   const handleEditUser = (user: User) => {
     setEditingUser(user);
-    setSelectedRole(user.role || "agency_employee");
+    setSelectedRole(user.role === "agency_client" ? "agency_client" : "agency_admin");
     setSelectedAgency(user.agencyId?.toString() || "");
     setSelectedClients(user.clientAccess || []);
   };
@@ -346,28 +342,23 @@ export default function AdminPage() {
       userId: editingUser.id,
       role: selectedRole,
       agencyId: selectedAgency ? parseInt(selectedAgency) : undefined,
-      clientAccess: (selectedRole === "agency_employee" || selectedRole === "agency_client") ? selectedClients : undefined,
+      clientAccess: selectedRole === "agency_client" ? selectedClients : undefined,
     });
   };
 
   const toggleClientAccess = (clientId: number) => {
-    setSelectedClients(prev => 
-      prev.includes(clientId) 
-        ? prev.filter(id => id !== clientId)
-        : [...prev, clientId]
-    );
+    setSelectedClients(prev => prev.includes(clientId) ? [] : [clientId]);
   };
 
   const getRoleBadge = (role: string | null) => {
     switch (role) {
       case "owner":
-        return <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">Owner</Badge>;
       case "agency_admin":
-        return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Agency Admin</Badge>;
+        return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Admin</Badge>;
       case "agency_employee":
-        return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Agency Employee</Badge>;
+        return <Badge variant="outline">Disabled</Badge>;
       case "agency_client":
-        return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Agency Client</Badge>;
+        return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Client</Badge>;
       default:
         return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">Member</Badge>;
     }
@@ -517,8 +508,8 @@ export default function AdminPage() {
                 <CardContent className="text-sm text-muted-foreground space-y-2">
                   <p>1. <strong>Create an agency</strong> using the button above</p>
                   <p>2. <strong>Go to Users tab</strong> and click "Invite User"</p>
-                  <p>3. <strong>Select "agency_admin" role</strong> and assign them to the new agency</p>
-                  <p>4. <strong>Share the invite link</strong> with the agency admin</p>
+                  <p>3. <strong>Select Admin</strong> and assign them to the new agency</p>
+                  <p>4. <strong>Share the invite link</strong> with the admin</p>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -529,7 +520,7 @@ export default function AdminPage() {
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-lg font-medium">User Management</h3>
-                  <p className="text-sm text-muted-foreground">Manage user roles and permissions across agencies.</p>
+                  <p className="text-sm text-muted-foreground">Admin and Client accounts. Former employee accounts are disabled.</p>
                 </div>
                 <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) resetInviteForm(); }}>
                   <DialogTrigger asChild>
@@ -564,18 +555,16 @@ export default function AdminPage() {
                                 <SelectValue placeholder="Select role" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="owner">Owner (Super Admin)</SelectItem>
-                                <SelectItem value="agency_admin">Agency Admin</SelectItem>
-                                <SelectItem value="agency_employee">Agency Employee</SelectItem>
-                                <SelectItem value="agency_client">Agency Client</SelectItem>
+                                <SelectItem value="agency_admin">Admin</SelectItem>
+                                <SelectItem value="agency_client">Client</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
 
-                          {(inviteRole === "agency_admin" || inviteRole === "agency_employee" || inviteRole === "agency_client") && (
+                          {(inviteRole === "agency_admin" || inviteRole === "agency_client") && (
                             <div className="space-y-2">
                               <Label>Agency</Label>
-                              <Select value={inviteAgency} onValueChange={setInviteAgency}>
+                              <Select value={inviteAgency} onValueChange={(value) => { setInviteAgency(value); setInviteClients([]); }}>
                                 <SelectTrigger data-testid="select-invite-agency">
                                   <SelectValue placeholder="Select agency" />
                                 </SelectTrigger>
@@ -590,7 +579,7 @@ export default function AdminPage() {
                             </div>
                           )}
 
-                          {(inviteRole === "agency_employee" || inviteRole === "agency_client") && inviteAgency && (
+                          {inviteRole === "agency_client" && inviteAgency && (
                             <div className="space-y-2">
                               <Label>Assigned Clients</Label>
                               <div className="grid gap-2 max-h-48 overflow-y-auto border rounded-md p-2">
@@ -616,7 +605,7 @@ export default function AdminPage() {
                           <Button 
                             onClick={handleCreateInvite} 
                             className="w-full"
-                            disabled={createInviteMutation.isPending || ((inviteRole === "agency_admin" || inviteRole === "agency_employee" || inviteRole === "agency_client") && !inviteAgency)}
+                            disabled={createInviteMutation.isPending || !inviteAgency || (inviteRole === "agency_client" && inviteClients.length !== 1)}
                             data-testid="button-generate-invite"
                           >
                             {createInviteMutation.isPending ? "Generating..." : "Generate Invite Link"}
@@ -713,24 +702,20 @@ export default function AdminPage() {
                                     <SelectValue placeholder="Select role" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="owner">Owner (Super Admin)</SelectItem>
-                                    <SelectItem value="agency_admin">Agency Admin</SelectItem>
-                                    <SelectItem value="agency_employee">Agency Employee</SelectItem>
-                                    <SelectItem value="agency_client">Agency Client</SelectItem>
+                                    <SelectItem value="agency_admin">Admin</SelectItem>
+                                    <SelectItem value="agency_client">Client</SelectItem>
                                   </SelectContent>
                                 </Select>
                                 <p className="text-xs text-muted-foreground">
-                                  {selectedRole === "owner" && "Can see all agencies and all clients."}
-                                  {selectedRole === "agency_admin" && "Can see their agency and its clients."}
-                                  {selectedRole === "agency_employee" && "Can only see assigned clients."}
-                                  {selectedRole === "agency_client" && "Limited view: Dashboard, Masterclass Tracker, Projections, Training Lab only."}
+                                  {selectedRole === "agency_admin" && "Can manage an agency and its clients."}
+                                  {selectedRole === "agency_client" && "Can access one assigned client workspace."}
                                 </p>
                               </div>
 
-                              {(selectedRole === "agency_admin" || selectedRole === "agency_employee" || selectedRole === "agency_client") && (
+                              {(selectedRole === "agency_admin" || selectedRole === "agency_client") && user.role !== "owner" && (
                                 <div className="space-y-2">
                                   <Label>Agency</Label>
-                                  <Select value={selectedAgency} onValueChange={setSelectedAgency}>
+                                  <Select value={selectedAgency} onValueChange={(value) => { setSelectedAgency(value); setSelectedClients([]); }}>
                                     <SelectTrigger data-testid="select-agency">
                                       <SelectValue placeholder="Select agency" />
                                     </SelectTrigger>
@@ -745,7 +730,7 @@ export default function AdminPage() {
                                 </div>
                               )}
 
-                              {(selectedRole === "agency_employee" || selectedRole === "agency_client") && selectedAgency && (
+                              {selectedRole === "agency_client" && selectedAgency && user.role !== "owner" && (
                                 <div className="space-y-2">
                                   <Label>Assigned Clients</Label>
                                   <div className="grid gap-2 max-h-48 overflow-y-auto border rounded-md p-2">
@@ -774,7 +759,7 @@ export default function AdminPage() {
                               <Button 
                                 onClick={handleSaveRole} 
                                 className="w-full"
-                                disabled={updateRoleMutation.isPending}
+                                disabled={updateRoleMutation.isPending || (user.role !== "owner" && !selectedAgency) || (selectedRole === "agency_client" && selectedClients.length !== 1)}
                                 data-testid="button-save-role"
                               >
                                 {updateRoleMutation.isPending ? "Saving..." : "Save Changes"}
@@ -814,7 +799,7 @@ export default function AdminPage() {
                                 {invite.email || "No email specified"}
                               </div>
                               <div className="text-sm text-muted-foreground">
-                                Role: {invite.role} {invite.agencyId ? `• Agency ${invite.agencyId}` : ""}
+                                Role: {invite.role === "agency_client" ? "Client" : invite.role === "agency_admin" ? "Admin" : "Disabled legacy invite"} {invite.agencyId ? `• Agency ${invite.agencyId}` : ""}
                               </div>
                             </div>
                           </div>

@@ -27,6 +27,7 @@ test("agency clients are routed only to a single persisted client assignment", (
     getPostLoginRedirect({ role: "agency_admin", clientAccess: [42] }),
     "/",
   );
+  assert.equal(getPostLoginRedirect({ role: "agency_employee" }), "/access-denied");
   assert.equal(getPostLoginRedirect(undefined), "/");
 });
 

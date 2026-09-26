@@ -109,6 +109,10 @@ async function upsertUser(claims: any, inviteToken?: string): Promise<{ authoriz
     if (existingUser.id.startsWith("demo-client:")) {
       return { authorized: false, reason: "no_invite" };
     }
+    // Former employee accounts are disabled, including when matched by email.
+    if (existingUser.role === "agency_employee") {
+      return { authorized: false, reason: "disabled" };
+    }
     // Any user already in the database is allowed in — role governs permissions
     await storage.upsertUser({
       id: userId,
@@ -136,7 +140,8 @@ async function upsertUser(claims: any, inviteToken?: string): Promise<{ authoriz
   // Check for valid invite token first
   if (inviteToken) {
     const invite = await storage.getInviteByToken(inviteToken);
-    if (invite && !invite.usedAt && (!invite.email || invite.email.toLowerCase() === email?.toLowerCase())) {
+    if (invite && (invite.role === "agency_admin" || invite.role === "agency_client") &&
+        !invite.usedAt && (!invite.email || invite.email.toLowerCase() === email?.toLowerCase())) {
       const isExpired = invite.expiresAt && new Date(invite.expiresAt) < new Date();
       if (!isExpired) {
         // Create/update user and assign role from invite
@@ -162,7 +167,7 @@ async function upsertUser(claims: any, inviteToken?: string): Promise<{ authoriz
   // Check for invite by email
   if (email) {
     const emailInvite = await storage.getInviteByEmail(email);
-    if (emailInvite) {
+    if (emailInvite && (emailInvite.role === "agency_admin" || emailInvite.role === "agency_client")) {
       const isExpired = emailInvite.expiresAt && new Date(emailInvite.expiresAt) < new Date();
       if (!isExpired) {
         // Create/update user and assign role from invite
@@ -192,6 +197,7 @@ async function upsertUser(claims: any, inviteToken?: string): Promise<{ authoriz
 export function getPostLoginRedirect(
   persistedUser?: { role?: string | null; clientAccess?: number[] | null },
 ): string {
+  if (persistedUser?.role === "agency_employee") return "/access-denied";
   if (persistedUser?.role !== "agency_client") return "/";
 
   const assignedClientIds = persistedUser.clientAccess;
@@ -380,6 +386,7 @@ export async function setupAuth(app: Express) {
           const persistedUser = await storage.getUser(user.claims?.sub);
           delete req.session.loginPortal;
           if (!persistedUser) return res.redirect("/access-denied");
+          if (persistedUser.role === "agency_employee") return res.redirect("/access-denied");
           if (loginPortalMismatch(loginPortal, persistedUser?.role)) {
             return res.redirect(loginPortal === "client" ? "/client-login?account=internal" : "/");
           }
@@ -420,6 +427,10 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
   // Block users who were flagged as access denied
   if (user.accessDenied) {
     return res.status(403).json({ message: "Access denied. You need an invitation to use this application." });
+  }
+  const persistedUser = await storage.getUser(user.claims?.sub);
+  if (!persistedUser || persistedUser.role === "agency_employee") {
+    return res.status(403).json({ message: "This account is disabled. Contact an administrator." });
   }
 
   const now = Math.floor(Date.now() / 1000);
