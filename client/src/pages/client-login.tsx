@@ -41,7 +41,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
         <div className="client-login-orbit client-login-orbit-one" />
         <div className="client-login-orbit client-login-orbit-two" />
         <div className="client-login-visual-copy">
-          <p className="client-login-eyebrow"><span /> PRIVATE CLIENT WORKSPACE</p>
+          <p className="client-login-eyebrow"><span /> {mode === "admin" ? "PRIVATE ADMIN WORKSPACE" : "PRIVATE CLIENT WORKSPACE"}</p>
           <h1>Your events,<br /><em>in motion.</em></h1>
           <p>One clear place to plan, launch, and see what is working.</p>
         </div>
@@ -59,7 +59,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
           <header className="client-login-brand">
             <img src="/logo-light.png" alt="EventHQ" />
             <span className="client-login-brand-rule" />
-            <span>{mode === "admin" ? "Staff access" : "Client access"}</span>
+            <span>{mode === "admin" ? "Admin access" : "Client access"}</span>
           </header>
           <div className="client-login-welcome">
             <div className="client-login-mark"><LockKeyhole size={18} strokeWidth={1.8} /></div>
@@ -69,10 +69,10 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
           </div>
           {wrongPortal && (
             <div className="client-demo-access" role="alert">
-              <div className="client-demo-heading">This is a {mode === "client" ? "staff" : "client"} account</div>
+              <div className="client-demo-heading">This is a {mode === "client" ? "Admin" : "Client"} account</div>
               <p>{mode === "client"
                 ? "Your account has internal access, not a client-only workspace. Contact your agency administrator if this is incorrect."
-                : "Your account has client access, not staff access."}</p>
+                : "Your account has client access, not admin access."}</p>
               <a href="/" className="client-login-button">
                 Open your assigned view <ArrowRight size={18} />
               </a>
@@ -83,7 +83,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
             <div className="client-demo-access">
               <div className="client-demo-heading">Sign in with email</div>
               <p>{mode === "admin"
-                ? "Enter your staff email and password to continue."
+                ? "Enter your admin email and password to continue."
                 : "Enter the email and password your agency gave you."}</p>
               <form onSubmit={signIn} className="client-demo-form">
                 <label htmlFor="login-email">Email address</label>
@@ -122,7 +122,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
           <p className="client-login-help">
             {mode === "admin"
               ? <>Are you a client? <a href="/client-login" data-testid="link-client-login">Client login</a></>
-              : <>Agency team member? <a href="/admin-login" data-testid="link-staff-login">Staff login</a></>}
+              : <>Agency admin? <a href="/admin-login" data-testid="link-admin-login">Admin login</a></>}
           </p>
           <footer className="client-login-bottom">
             <span><Check size={14} /> Private client workspace</span>

@@ -30,8 +30,8 @@ async function canAccessClient(user: User | undefined, clientId: number): Promis
     return client?.agencyId === user.agencyId;
   }
   
-  // Agency employee/client can only access assigned clients
-  if ((user.role === "agency_employee" || user.role === "agency_client") && user.clientAccess?.length) {
+  // Clients can only access their assigned workspace.
+  if (user.role === "agency_client" && user.clientAccess?.length) {
     return user.clientAccess.includes(clientId);
   }
   
@@ -75,7 +75,7 @@ function isAdminUser(user: User | undefined) {
   return user?.role === "owner" || user?.role === "agency_admin";
 }
 function isAgencyStaff(user: User | undefined) {
-  return isAdminUser(user) || user?.role === "agency_employee";
+  return isAdminUser(user);
 }
 const performanceProductSchema = z.object({
   id: z.string().optional(),
@@ -193,6 +193,9 @@ export function registerApiRoutes(app: Express): void {
   app.use(async (req: any, res, next) => {
     if (!req.path.startsWith("/api/")) return next();
     const user = await getRequestUser(req);
+    if (user?.role === "agency_employee") {
+      return res.status(403).json({ error: "This account is disabled. Contact an administrator." });
+    }
     if (user?.role !== "agency_client" && !req.user?.demoLogin) return next();
     const path = (req.originalUrl || req.path).split("?")[0];
     if (clientPortalActions.some(action => action.method === req.method && action.path.test(path))) {
@@ -293,7 +296,28 @@ export function registerApiRoutes(app: Express): void {
         return res.status(403).json({ error: "Forbidden" });
       }
       const { role, agencyId, clientAccess } = req.body;
-      const user = await storage.updateUserRole(req.params.id, role, agencyId, clientAccess);
+      if (role !== "agency_admin" && role !== "agency_client") {
+        return res.status(400).json({ error: "Choose Admin or Client." });
+      }
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ error: "User not found" });
+      if (target.role === "owner" && role === "agency_client") {
+        return res.status(400).json({ error: "The primary admin cannot be changed to a client." });
+      }
+      const effectiveRole = target.role === "owner" ? "owner" : role;
+      if (effectiveRole !== "owner" && (!Number.isSafeInteger(agencyId) || agencyId <= 0 || !await storage.getAgency(agencyId))) {
+        return res.status(400).json({ error: "A valid agency is required." });
+      }
+      if (role === "agency_client") {
+        if (!Array.isArray(clientAccess) || clientAccess.length !== 1 ||
+            !Number.isSafeInteger(clientAccess[0]) ||
+            (await storage.getClient(clientAccess[0]))?.agencyId !== agencyId) {
+          return res.status(400).json({ error: "Assign exactly one client in the selected agency." });
+        }
+      }
+      const user = await storage.updateUserRole(req.params.id, effectiveRole,
+        effectiveRole === "owner" ? target.agencyId ?? undefined : agencyId,
+        role === "agency_client" ? clientAccess : undefined);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -304,7 +328,8 @@ export function registerApiRoutes(app: Express): void {
     }
   });
 
-  const USER_ROLES = ["owner", "agency_admin", "agency_employee", "agency_client"] as const;
+  // New accounts are Admin or Client only; legacy employee accounts stay disabled.
+  const USER_ROLES = ["agency_admin", "agency_client"] as const;
   const loginEmailSchema = z.string().trim().toLowerCase().email("Enter a valid email address.").max(320);
 
   // Validates a new login; returns the normalized email or an error with its HTTP status.
@@ -629,8 +654,8 @@ export function registerApiRoutes(app: Express): void {
         return res.json(stripHeadshotFromClients(clients));
       }
       
-      // Employees and client users see only their assigned client workspaces.
-      if ((user?.role === "agency_employee" || user?.role === "agency_client") && user.clientAccess?.length) {
+      // Clients see only their assigned workspace.
+      if (user?.role === "agency_client" && user.clientAccess?.length) {
         const clients = await storage.getClientsByIds(user.clientAccess);
         return res.json(stripHeadshotFromClients(clients));
       }
@@ -2217,7 +2242,7 @@ export function registerApiRoutes(app: Express): void {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId, 10);
       
-      if (!user || (user.role !== "owner" && user.role !== "agency_admin" && user.role !== "agency_employee")) {
+      if (!isAdminUser(user)) {
         return forbidden(res);
       }
       
@@ -2285,7 +2310,7 @@ export function registerApiRoutes(app: Express): void {
       const user = await getRequestUser(req);
       const entryId = parseInt(req.params.id, 10);
       
-      if (!user || (user.role !== "owner" && user.role !== "agency_admin" && user.role !== "agency_employee")) {
+      if (!isAdminUser(user)) {
         return forbidden(res);
       }
       
@@ -2367,7 +2392,7 @@ export function registerApiRoutes(app: Express): void {
       const user = await getRequestUser(req);
       const entryId = parseInt(req.params.id, 10);
       
-      if (!user || (user.role !== "owner" && user.role !== "agency_admin" && user.role !== "agency_employee")) {
+      if (!isAdminUser(user)) {
         return forbidden(res);
       }
       

@@ -67,6 +67,7 @@ export function getSession() {
 export function getPostLoginRedirect(
   persistedUser?: { role?: string | null; clientAccess?: number[] | null },
 ): string {
+  if (persistedUser?.role === "agency_employee") return "/access-denied";
   if (persistedUser?.role !== "agency_client") return "/";
 
   const assignedClientIds = persistedUser.clientAccess;
@@ -140,11 +141,15 @@ export async function setupAuth(app: Express) {
       if (!valid || !user) {
         return res.status(401).json({ error: "Invalid email or password." });
       }
+      // Former employee accounts are kept for history but can no longer sign in.
+      if (user.role === "agency_employee") {
+        return res.status(403).json({ error: "This account is disabled. Contact an administrator." });
+      }
       if (loginPortalMismatch(req.body?.portal, user.role)) {
         return res.status(403).json({
           error: user.role === "agency_client"
             ? "This is a client account. Use Client Login."
-            : "This is a staff account. Use Staff Login.",
+            : "This is an admin account. Use Admin Login.",
         });
       }
       if (!await hasActiveWorkspace(user)) {

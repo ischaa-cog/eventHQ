@@ -123,8 +123,8 @@ The app keeps agency records as an internal tenant boundary for client data and 
 
 ## Logins
 
-- Everyone signs in with email + password: staff at `/admin-login`, clients at `/client-login`. Passwords are stored only as scrypt hashes in the `user_credentials` table.
+- Everyone signs in with email + password: admins at `/admin-login`, clients at `/client-login`. Passwords are stored only as scrypt hashes in the `user_credentials` table.
 - **Client logins**: create one in the Add Client form, or later in the workspace's **Client Access** tab (add, reset password, remove). A client login opens exactly one workspace; deactivating the workspace blocks it.
-- **Staff users**: the owner adds them in **Admin Settings → Users** (Add User, reset password, remove).
+- **Admin users**: the owner adds them in **Admin Settings → Users** (Add User: Admin or Client; reset password; remove). Former employee accounts are kept but disabled.
 - **Forgotten owner password**: `npx tsx --env-file=.env script/set-password.ts <email> <new password>`.
 - One-time setup on a new database: `npx tsx --env-file=.env script/migrate-credentials.ts` (creates `user_credentials`; safe to re-run).

@@ -150,17 +150,16 @@ test("critical API workflows enforce tenant, role, metrics, and profile boundari
       title: "Cross tenant edit",
     })).status, 403);
 
-    // Profile fields are available to assigned employee/client users, while
-    // privileged-only name edits and unsupported fields remain protected.
+    // Former employees are disabled; admins can edit profile fields.
     assert.equal((await request(employeeA, `/api/clients/${clientA.id}`, "PATCH", {
       businessName: "Updated by employee",
-    })).status, 200);
-    assert.equal((await request(clientUserA, `/api/clients/${clientA.id}`, "PATCH", {
+    })).status, 403);
+    assert.equal((await request(adminA, `/api/clients/${clientA.id}`, "PATCH", {
       phone: "555-0100",
     })).status, 200);
     assert.equal((await request(employeeA, `/api/clients/${clientA.id}`, "PATCH", {
       name: "Not allowed",
-    })).status, 400);
+    })).status, 403);
     assert.equal((await request(adminB, `/api/clients/${clientA.id}`, "PATCH", {
       businessName: "Cross tenant edit",
     })).status, 403);

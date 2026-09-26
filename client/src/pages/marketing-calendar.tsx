@@ -59,7 +59,7 @@ export default function MarketingCalendarPage() {
   const [configOpen, setConfigOpen] = useState(false);
   const [localSyncError, setLocalSyncError] = useState<string | null>(null);
 
-  const canEdit = user?.role === "owner" || user?.role === "agency_admin" || user?.role === "agency_employee";
+  const canEdit = user?.role === "owner" || user?.role === "agency_admin";
   const canConfigure = user?.role === "owner";
 
   const { data: entries = [], isLoading } = useQuery<CalendarEntry[]>({

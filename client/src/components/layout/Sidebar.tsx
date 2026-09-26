@@ -61,11 +61,9 @@ function UserInfo() {
     ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
     : displayName.slice(0, 2).toUpperCase();
   
-  const roleDisplay = user?.role === "owner" ? "Owner" 
-    : user?.role === "agency_admin" ? "Admin"
-    : user?.role === "agency_employee" ? "Employee"
+  const roleDisplay = user?.role === "owner" || user?.role === "agency_admin" ? "Admin"
     : user?.role === "agency_client" ? "Client"
-    : "Member";
+    : "Disabled";
 
   return (
     <div className="flex items-center">
