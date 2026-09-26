@@ -4,16 +4,15 @@ import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
 import { eq, inArray } from "drizzle-orm";
-import { agencies, assets, clients, events, invites, notificationRecipients, notifications, tuckChats, tuckMessages, users, webinarGoals, webinars } from "@shared/schema";
+import { agencies, assets, clients, events, notificationRecipients, notifications, tuckChats, tuckMessages, users, webinarGoals, webinars } from "@shared/schema";
 import { db } from "./storage";
 import { registerApiRoutes } from "./routes";
 
-test("API keeps invites and events inside the user's tenant and rejects invalid writes", async () => {
+test("API keeps client logins and events inside the user's tenant and rejects invalid writes", async () => {
   const marker = randomUUID();
   const agencyIds: number[] = [];
   const clientIds: number[] = [];
   const userIds: string[] = [];
-  const inviteIds: number[] = [];
   const eventIds: number[] = [];
   const assetIds: number[] = [];
   const webinarIds: number[] = [];
@@ -85,30 +84,40 @@ test("API keeps invites and events inside the user's tenant and rejects invalid 
     assert.equal(convertedImage.status, 200);
     assert.match(convertedImage.body.imageData, /^data:image\/jpeg;base64,/);
 
-    const [inviteA] = await db.insert(invites).values({
-      token: randomUUID(), role: "agency_client", agencyId: agencyA.id, createdById: adminA,
-    }).returning();
-    const [inviteB] = await db.insert(invites).values({
-      token: randomUUID(), role: "agency_client", agencyId: agencyB.id, createdById: adminB,
-    }).returning();
-    inviteIds.push(inviteA.id, inviteB.id);
+    // Client logins: only admins of the workspace's agency (or the owner) manage them.
+    const loginsA = `/api/clients/${clientA.id}/users`;
+    const loginEmail = `boundary-login-${marker}@example.com`;
+    assert.equal((await request(null, loginsA)).status, 401);
+    assert.equal((await request(employeeA, loginsA)).status, 403);
+    assert.equal((await request(customerA, loginsA)).status, 403);
+    assert.equal((await request(adminB, loginsA)).status, 403);
+    assert.equal((await request(adminA, loginsA, "POST", { email: loginEmail, password: "short" })).status, 400);
+    assert.equal((await request(adminA, loginsA, "POST", { email: "not-an-email", password: "long-enough-1" })).status, 400);
+    const createdLogin = await request(adminA, loginsA, "POST", { email: loginEmail.toUpperCase(), password: "long-enough-1" });
+    assert.equal(createdLogin.status, 201);
+    userIds.push(createdLogin.body.id);
+    assert.equal(createdLogin.body.email, loginEmail);
+    assert.equal((await request(adminA, loginsA, "POST", { email: loginEmail, password: "long-enough-2" })).status, 409);
+    assert.deepEqual((await request(adminA, loginsA)).body.map((login: any) => login.id), [createdLogin.body.id]);
+    assert.equal((await request(adminB, `${loginsA}/${createdLogin.body.id}/password`, "PATCH", { password: "long-enough-3" })).status, 403);
+    assert.equal((await request(owner, `/api/clients/${clientB.id}/users/${createdLogin.body.id}/password`, "PATCH", { password: "long-enough-3" })).status, 404);
+    assert.equal((await request(adminA, `${loginsA}/${createdLogin.body.id}/password`, "PATCH", { password: "long-enough-3" })).status, 200);
+    assert.equal((await request(adminA, `${loginsA}/${customerA}`, "DELETE")).status, 204);
+    userIds.splice(userIds.indexOf(customerA), 1);
+    assert.equal((await request(adminA, `${loginsA}/${createdLogin.body.id}`, "DELETE")).status, 204);
+    userIds.splice(userIds.indexOf(createdLogin.body.id), 1);
+    await db.insert(users).values({ id: customerA, role: "agency_client", agencyId: agencyA.id, clientAccess: [clientA.id] });
+    userIds.push(customerA);
 
-    assert.equal((await request(null, "/api/invites")).status, 401);
-    assert.equal((await request(adminA, "/api/invites", "POST", {
-      role: "agency_employee", clientAccess: [clientB.id],
-    })).status, 400);
-    assert.equal((await request(adminA, "/api/invites", "POST", {
-      role: "owner",
+    // Staff users are owner-only; the owner can't remove themselves.
+    assert.equal((await request(adminA, "/api/users", "POST", {
+      email: `boundary-staff-${marker}@example.com`, password: "long-enough-1", role: "agency_employee", agencyId: agencyA.id,
     })).status, 403);
-    assert.equal((await request(customerA, "/api/invites")).status, 403);
-    assert.equal((await request(employeeA, `/api/invites/${inviteA.id}`, "DELETE")).status, 403);
-    assert.equal((await request(adminA, `/api/invites/${inviteB.id}`, "DELETE")).status, 403);
-    assert.equal((await request(adminA, `/api/invites/not-an-id`, "DELETE")).status, 400);
-    assert.equal((await request(adminA, "/api/invites")).body.length, 1);
-    assert.equal((await request(adminA, `/api/invites/${inviteA.id}`, "DELETE")).status, 204);
-    inviteIds.splice(inviteIds.indexOf(inviteA.id), 1);
-    assert.equal((await request(owner, `/api/invites/${inviteB.id}`, "DELETE")).status, 204);
-    inviteIds.splice(inviteIds.indexOf(inviteB.id), 1);
+    assert.equal((await request(owner, "/api/users", "POST", {
+      email: `boundary-staff-${marker}@example.com`, password: "long-enough-1", role: "agency_client",
+      agencyId: agencyA.id, clientAccess: [clientA.id, clientB.id],
+    })).status, 400);
+    assert.equal((await request(owner, `/api/users/${owner}`, "DELETE")).status, 400);
 
     assert.equal((await request(customerA, `/api/clients/${clientB.id}/events`)).status, 403);
     assert.equal((await request(null, `/api/clients/${clientA.id}/events`)).status, 401);
@@ -206,7 +215,10 @@ test("API keeps invites and events inside the user's tenant and rejects invalid 
     const [storedWebinar] = await db.select().from(webinars).where(eq(webinars.id, createdWebinar.body.id));
     assert.equal(storedWebinar.clientId, clientA.id);
 
-    const createdGoals = await request(employeeA, `/api/clients/${clientA.id}/webinar-goals`, "POST", {
+    assert.equal((await request(employeeA, `/api/clients/${clientA.id}/webinar-goals`, "PATCH", {
+      targetRevenue: "100",
+    })).status, 403);
+    const createdGoals = await request(adminA, `/api/clients/${clientA.id}/webinar-goals`, "POST", {
       clientId: clientB.id, targetRevenue: "100",
     });
     assert.equal(createdGoals.status, 201);
@@ -251,7 +263,6 @@ test("API keeps invites and events inside the user's tenant and rejects invalid 
     if (webinarIds.length) await db.delete(webinars).where(inArray(webinars.id, webinarIds));
     if (assetIds.length) await db.delete(assets).where(inArray(assets.id, assetIds));
     if (eventIds.length) await db.delete(events).where(inArray(events.id, eventIds));
-    if (inviteIds.length) await db.delete(invites).where(inArray(invites.id, inviteIds));
     if (userIds.length) await db.delete(users).where(inArray(users.id, userIds));
     if (clientIds.length) await db.delete(clients).where(inArray(clients.id, clientIds));
     if (agencyIds.length) await db.delete(agencies).where(inArray(agencies.id, agencyIds));

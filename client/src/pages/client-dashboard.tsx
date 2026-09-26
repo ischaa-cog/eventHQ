@@ -2,7 +2,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, FileText, CheckCircle2, AlertCircle, ArrowRight, DollarSign, TrendingUp, Award, Trophy, Star, Target, Play, CalendarPlus, GraduationCap, BarChart3, Palette, Rocket, Zap, Crown, Gem, Lock, Megaphone, ExternalLink, RefreshCw } from "lucide-react";
+import { Calendar, FileText, CheckCircle2, AlertCircle, ArrowRight, DollarSign, TrendingUp, Award, Trophy, Star, Target, Play, GraduationCap, BarChart3, Palette, Rocket, Zap, Crown, Gem, Lock, Megaphone, ExternalLink, RefreshCw } from "lucide-react";
 import { Link, useParams } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -587,10 +587,10 @@ export default function ClientDashboard() {
                 {!isAgencyClient && (
                   <>
                     <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                      <CalendarPlus className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <BarChart3 className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
-                        <p className="font-medium text-sm">Event Builder</p>
-                        <p className="text-xs text-muted-foreground">Create masterclasses, summits, and challenges</p>
+                        <p className="font-medium text-sm">Event Tracker</p>
+                        <p className="text-xs text-muted-foreground">Track masterclasses, summits, and challenges</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">

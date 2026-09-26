@@ -32,10 +32,17 @@ export const users = pgTable("users", {
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 
-// Passwords for explicitly provisioned demo clients only. Regular users use Replit Auth.
+// Legacy: demo passwords before user_credentials existed. Copied by script/migrate-credentials.ts; no longer read.
 export const demoCredentials = pgTable("demo_credentials", {
   userId: varchar("user_id").primaryKey().references(() => users.id),
   passwordHash: text("password_hash").notNull(),
+});
+
+// Email + password login for every user. Only a scrypt "salt:hash" is stored, never the password.
+export const userCredentials = pgTable("user_credentials", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  passwordHash: text("password_hash").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // AGENCIES
@@ -418,6 +425,7 @@ export const eventPerformance = pgTable("event_performance", {
   // Common metrics
   totalRegistrants: integer("total_registrants").default(0),
   totalAttendees: integer("total_attendees").default(0),
+  peopleAtPitch: integer("people_at_pitch").default(0).notNull(), // still present when the offer was made
   adSpend: numeric("ad_spend", { precision: 10, scale: 2 }).default("0"),
   
   // Offer type - what are we selling?

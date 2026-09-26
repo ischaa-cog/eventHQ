@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 import { useParams, useLocation } from "wouter";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
-import { TuckBubble } from "@/components/TuckBubble";
+import { NeoBubble } from "@/components/NeoBubble";
 import { PageMotion } from "@/components/PageMotion";
 
 interface AppLayoutProps {
@@ -18,7 +18,7 @@ export function AppLayout({ children, title = "EventHQ", mode = "client", showSe
   const [location] = useLocation();
 
   const clientId = params.id;
-  const isOnTuckPage = location.includes("/tuck");
+  const isOnNeoPage = location.endsWith("/neo");
 
   return (
     <div className="flex min-h-screen md:h-screen overflow-hidden bg-background pt-14 md:pt-0">
@@ -29,8 +29,8 @@ export function AppLayout({ children, title = "EventHQ", mode = "client", showSe
           <PageMotion key={location}>{children}</PageMotion>
         </main>
       </div>
-      {mode === "client" && clientId && !isOnTuckPage && (
-        <TuckBubble clientId={clientId} pageContext={pageContext || title} />
+      {mode === "client" && clientId && !isOnNeoPage && (
+        <NeoBubble clientId={clientId} pageContext={pageContext || title} />
       )}
     </div>
   );

@@ -34,64 +34,6 @@ interface SendNotificationEmailParams {
   agencyName?: string;
 }
 
-interface SendInviteEmailParams {
-  to: string;
-  inviteToken: string;
-  agencyName: string;
-  clientName: string;
-  baseUrl: string;
-}
-
-export async function sendInviteEmail({
-  to,
-  inviteToken,
-  agencyName,
-  clientName,
-  baseUrl,
-}: SendInviteEmailParams): Promise<{ success: boolean; error?: string }> {
-  try {
-    const inviteUrl = `${baseUrl}/api/login?invite_token=${encodeURIComponent(inviteToken)}`;
-    
-    await deliverEmail({
-      to: [to],
-      subject: `You've been invited to EventHQ`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%); padding: 24px; border-radius: 8px 8px 0 0;">
-             <h1 style="color: white; margin: 0; font-size: 24px;">${escapeHtml(agencyName)}</h1>
-          </div>
-          <div style="background: #ffffff; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-            <h2 style="color: #1f2937; margin-top: 0;">Welcome to EventHQ!</h2>
-            <p style="color: #4b5563; line-height: 1.6;">
-               You've been invited to join <strong>${escapeHtml(agencyName)}</strong> as a client for <strong>${escapeHtml(clientName)}</strong>.
-            </p>
-            <p style="color: #4b5563; line-height: 1.6;">
-              Click the button below to create your account and get started:
-            </p>
-            <div style="text-align: center; margin: 32px 0;">
-               <a href="${escapeHtml(inviteUrl)}" style="background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
-                Accept Invitation
-              </a>
-            </div>
-            <p style="color: #9ca3af; font-size: 12px;">
-               Or copy this link: ${escapeHtml(inviteUrl)}
-            </p>
-          </div>
-          <div style="text-align: center; padding: 16px; color: #9ca3af; font-size: 12px;">
-            Sent via EventHQ
-          </div>
-        </div>
-      `,
-      text: `You've been invited to EventHQ by ${agencyName}!\n\nClick this link to accept: ${inviteUrl}`,
-    });
-
-    return { success: true };
-  } catch (err: any) {
-    console.error('Invite email send error:', err.message);
-    return { success: false, error: err.message || 'Failed to send invite email' };
-  }
-}
-
 export async function sendNotificationEmail({
   to,
   subject,

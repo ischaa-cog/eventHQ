@@ -16,7 +16,7 @@ import {
 import { useLocation } from "wouter";
 import ReactMarkdown from "react-markdown";
 
-interface TuckMessage {
+interface NeoMessage {
   id: number;
   chatId: number;
   role: "user" | "assistant";
@@ -25,7 +25,7 @@ interface TuckMessage {
   createdAt: string;
 }
 
-interface TuckBubbleProps {
+interface NeoBubbleProps {
   clientId: string;
   pageContext?: string;
 }
@@ -37,13 +37,13 @@ declare global {
   }
 }
 
-export function TuckBubble({ clientId, pageContext }: TuckBubbleProps) {
+export function NeoBubble({ clientId, pageContext }: NeoBubbleProps) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
 
   const [isOpen, setIsOpen] = useState(false);
   const [chatId, setChatId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<TuckMessage[]>([]);
+  const [messages, setMessages] = useState<NeoMessage[]>([]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -78,7 +78,7 @@ export function TuckBubble({ clientId, pageContext }: TuckBubbleProps) {
     const id = await ensureChat();
 
     // Optimistic user message
-    const tempUserMsg: TuckMessage = {
+    const tempUserMsg: NeoMessage = {
       id: Date.now(),
       chatId: id,
       role: "user",
@@ -145,7 +145,7 @@ export function TuckBubble({ clientId, pageContext }: TuckBubbleProps) {
 
   const goToFullPage = () => {
     setIsOpen(false);
-    setLocation(`/client/${clientId}/tuck`);
+    setLocation(`/client/${clientId}/neo`);
   };
 
   return (

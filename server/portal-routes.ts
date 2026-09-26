@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { and, asc, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { isAuthenticated } from "./replitAuth";
+import { isAuthenticated } from "./auth";
 import { db } from "./storage";
 import { getGoogleCalendarClient } from "./googleCalendar";
 import { netSaleContribution } from "./sales-math";

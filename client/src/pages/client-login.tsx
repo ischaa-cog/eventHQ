@@ -14,12 +14,12 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  async function signInDemo(event: FormEvent) {
+  async function signIn(event: FormEvent) {
     event.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      const response = await fetch("/api/demo-login", {
+      const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
@@ -59,7 +59,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
           <header className="client-login-brand">
             <img src="/logo-light.png" alt="EventHQ" />
             <span className="client-login-brand-rule" />
-            <span>{mode === "admin" ? "Admin access" : "Client access"}</span>
+            <span>{mode === "admin" ? "Staff access" : "Client access"}</span>
           </header>
           <div className="client-login-welcome">
             <div className="client-login-mark"><LockKeyhole size={18} strokeWidth={1.8} /></div>
@@ -72,7 +72,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
               <div className="client-demo-heading">This is a {mode === "client" ? "staff" : "client"} account</div>
               <p>{mode === "client"
                 ? "Your account has internal access, not a client-only workspace. Contact your agency administrator if this is incorrect."
-                : "Your account has client access, not admin access."}</p>
+                : "Your account has client access, not staff access."}</p>
               <a href="/" className="client-login-button">
                 Open your assigned view <ArrowRight size={18} />
               </a>
@@ -83,14 +83,14 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
             <div className="client-demo-access">
               <div className="client-demo-heading">Sign in with email</div>
               <p>{mode === "admin"
-                ? "Enter your admin account credentials to continue."
-                : "Enter your client account credentials to continue."}</p>
-              <form onSubmit={signInDemo} className="client-demo-form">
-                <label htmlFor="demo-email">Email address</label>
-                <input id="demo-email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required />
-                <label htmlFor="demo-password">Password</label>
+                ? "Enter your staff email and password to continue."
+                : "Enter the email and password your agency gave you."}</p>
+              <form onSubmit={signIn} className="client-demo-form">
+                <label htmlFor="login-email">Email address</label>
+                <input id="login-email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required />
+                <label htmlFor="login-password">Password</label>
                 <div className="client-demo-password">
-                  <input id="demo-password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required />
+                  <input id="login-password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required />
                   <button
                     type="button"
                     className="client-demo-password-toggle"
@@ -106,9 +106,9 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
               </form>
             </div>
           )}
-          {!wrongPortal && (
-            <a className="client-login-button" href={isAuthenticated ? "/" : `/api/login?portal=${mode}`} data-testid="button-client-login">
-              {isAuthenticated ? "Open your workspace" : "Invited account? Sign in with Replit"}
+          {isAuthenticated && !wrongPortal && (
+            <a className="client-login-button" href="/" data-testid="button-client-login">
+              Open your workspace
               <ArrowRight size={18} />
             </a>
           )}
@@ -119,7 +119,11 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
               <p>Your account opens only the workspace and permissions assigned to you.</p>
             </div>
           </div>
-          <p className="client-login-help">Have a Replit invitation? Use Replit sign-in. Otherwise, enter the email and password provided to you above.</p>
+          <p className="client-login-help">
+            {mode === "admin"
+              ? <>Are you a client? <a href="/client-login" data-testid="link-client-login">Client login</a></>
+              : <>Agency team member? <a href="/admin-login" data-testid="link-staff-login">Staff login</a></>}
+          </p>
           <footer className="client-login-bottom">
             <span><Check size={14} /> Private client workspace</span>
             <span>EventHQ</span>

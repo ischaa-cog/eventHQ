@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { agencies, clients, users } from "@shared/schema";
 import { db } from "./storage";
-import { enforceDemoReadOnly, isAuthenticated } from "./replitAuth";
+import { enforceDemoReadOnly, isAuthenticated } from "./auth";
 
 function checkAccess(demoLogin: boolean, method: string, path: string) {
   let status: number | undefined;

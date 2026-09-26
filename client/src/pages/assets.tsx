@@ -210,7 +210,7 @@ export default function AssetsPage() {
               ) : !assets || assets.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    No assets yet. Generate assets from the Event Builder.
+                    No assets yet.
                   </TableCell>
                 </TableRow>
               ) : (

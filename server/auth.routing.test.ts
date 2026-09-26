@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getPostLoginRedirect, loginPortalMismatch } from "./replitAuth";
+import { getPostLoginRedirect, loginPortalMismatch } from "./auth";
 
 test("agency clients are routed only to a single persisted client assignment", () => {
   assert.equal(

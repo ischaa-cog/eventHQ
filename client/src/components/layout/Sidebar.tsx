@@ -111,14 +111,13 @@ const workspaceNavigation = [
 
 const clientNavigation = (clientId: string) => [
   { name: "Dashboard", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
-  { name: "Talk to Neo AI", href: `/client/${clientId}/tuck`, icon: Bot, special: true },
+  { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Client Workspaces", href: "/clients", icon: Users },
   { name: "Onboarding", href: `/client/${clientId}/onboarding`, icon: ClipboardList },
   { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
   { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
   { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },
-  { name: "Masterclass Tracker", href: `/client/${clientId}/webinars`, icon: Calendar },
   { name: "Assets", href: `/client/${clientId}/assets`, icon: Image },
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
@@ -127,7 +126,7 @@ const clientNavigation = (clientId: string) => [
 
 const clientPortalNavigation = (clientId: string) => [
   { name: "Dashboard", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
-  { name: "Talk to Neo AI", href: `/client/${clientId}/tuck`, icon: Bot, special: true },
+  { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
   { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },

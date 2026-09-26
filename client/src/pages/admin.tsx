@@ -10,13 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Save, Plus, Trash2, Users, Shield, Building2, Copy, Link, Mail, FileText, Pencil } from "lucide-react";
+import { Save, Plus, Trash2, Users, Shield, Building2, FileText, Pencil, KeyRound } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import type { User, Invite, AssetTemplate } from "@shared/schema";
+import type { User, AssetTemplate } from "@shared/schema";
+import { clientLoginUrl, generatePassword, LoginDetailsDialog, PasswordField, staffLoginUrl, type LoginDetails } from "@/components/LoginDetails";
 
 interface Agency {
   id: number;
@@ -40,12 +41,14 @@ export default function AdminPage() {
   const [selectedClients, setSelectedClients] = useState<number[]>([]);
   const [agencyName, setAgencyName] = useState("");
   const [agencyDefaultLanguage, setAgencyDefaultLanguage] = useState("");
-  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [inviteRole, setInviteRole] = useState("agency_employee");
-  const [inviteAgency, setInviteAgency] = useState("");
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteClients, setInviteClients] = useState<number[]>([]);
-  const [generatedLink, setGeneratedLink] = useState("");
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUserRole, setNewUserRole] = useState("agency_employee");
+  const [newUserAgency, setNewUserAgency] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserClients, setNewUserClients] = useState<number[]>([]);
+  const [resetPassword, setResetPassword] = useState("");
+  const [loginDetails, setLoginDetails] = useState<LoginDetails | null>(null);
   
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<AssetTemplate | null>(null);
@@ -95,11 +98,6 @@ export default function AdminPage() {
   const { data: clients = [] } = useQuery<Client[]>({
     queryKey: ["/api/clients"],
     enabled: currentUser?.role === "owner",
-  });
-
-  const { data: invites = [] } = useQuery<Invite[]>({
-    queryKey: ["/api/invites"],
-    enabled: currentUser?.role === "owner" || currentUser?.role === "agency_admin",
   });
 
   const { data: templates = [] } = useQuery<AssetTemplate[]>({
@@ -193,69 +191,77 @@ export default function AdminPage() {
     }
   };
 
-  const createInviteMutation = useMutation({
-    mutationFn: async (data: { role: string; agencyId?: number; email?: string; clientAccess?: number[] }) => {
-      const res = await apiRequest("POST", "/api/invites", data);
+  // apiRequest errors read "409: {json}"; show just the server's message.
+  const errorMessage = (error: Error) => {
+    const body = error.message.replace(/^\d+:\s*/, "");
+    try { return JSON.parse(body).error || body; } catch { return body; }
+  };
+  const loginUrlFor = (role: string) => role === "agency_client" ? clientLoginUrl() : staffLoginUrl();
+
+  const createUserMutation = useMutation({
+    mutationFn: async (data: { email: string; password: string; role: string; agencyId?: number; clientAccess?: number[] }) => {
+      const res = await apiRequest("POST", "/api/users", data);
       return res.json();
     },
-    onSuccess: (invite) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/invites"] });
-      const link = `${window.location.origin}/api/login?invite_token=${invite.token}`;
-      setGeneratedLink(link);
-      toast({ title: "Invite Created", description: "Share the link with the user to invite them." });
+    onSuccess: (user: User, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setAddUserOpen(false);
+      resetAddUserForm();
+      setLoginDetails({ title: "User created", email: user.email ?? variables.email, password: variables.password, loginUrl: loginUrlFor(variables.role) });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to create invite", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "User not created", description: errorMessage(error), variant: "destructive" });
     },
   });
 
-  const deleteInviteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/invites/${id}`);
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ user, password }: { user: User; password: string }) => {
+      await apiRequest("PATCH", `/api/users/${user.id}/password`, { password });
+    },
+    onSuccess: (_data, { user, password }) => {
+      setEditingUser(null);
+      setLoginDetails({ title: "Password changed", email: user.email ?? "", password, loginUrl: loginUrlFor(user.role ?? "") });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Password not changed", description: errorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      await apiRequest("DELETE", `/api/users/${userId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/invites"] });
-      toast({ title: "Success", description: "Invite deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      setEditingUser(null);
+      toast({ title: "User removed", description: "They can no longer sign in." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete invite", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "User not removed", description: errorMessage(error), variant: "destructive" });
     },
   });
 
-  const sendInviteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await apiRequest("POST", `/api/invites/${id}/send`);
-      return res.json();
-    },
-    onSuccess: () => toast({ title: "Invitation sent", description: "The existing invitation was emailed. No new workspace was created." }),
-    onError: (error: Error) => toast({ title: "Invitation not sent", description: error.message, variant: "destructive" }),
-  });
-
-  const handleCreateInvite = () => {
-    createInviteMutation.mutate({
-      role: inviteRole,
-      agencyId: inviteAgency ? parseInt(inviteAgency) : undefined,
-      email: inviteEmail || undefined,
-      clientAccess: (inviteRole === "agency_employee" || inviteRole === "agency_client") ? inviteClients : undefined,
+  const handleCreateUser = () => {
+    createUserMutation.mutate({
+      email: newUserEmail.trim(),
+      password: newUserPassword,
+      role: newUserRole,
+      agencyId: newUserAgency ? parseInt(newUserAgency) : undefined,
+      clientAccess: (newUserRole === "agency_employee" || newUserRole === "agency_client") ? newUserClients : undefined,
     });
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({ title: "Copied", description: "Link copied to clipboard" });
+  const resetAddUserForm = () => {
+    setNewUserRole("agency_employee");
+    setNewUserAgency("");
+    setNewUserEmail("");
+    setNewUserPassword(generatePassword());
+    setNewUserClients([]);
   };
 
-  const resetInviteForm = () => {
-    setInviteRole("agency_employee");
-    setInviteAgency("");
-    setInviteEmail("");
-    setInviteClients([]);
-    setGeneratedLink("");
-  };
-
-  const toggleInviteClient = (clientId: number) => {
-    setInviteClients(prev => 
-      prev.includes(clientId) 
+  const toggleNewUserClient = (clientId: number) => {
+    setNewUserClients(prev =>
+      prev.includes(clientId)
         ? prev.filter(id => id !== clientId)
         : [...prev, clientId]
     );
@@ -335,6 +341,7 @@ export default function AdminPage() {
 
   const handleEditUser = (user: User) => {
     setEditingUser(user);
+    setResetPassword(generatePassword());
     setSelectedRole(user.role || "agency_employee");
     setSelectedAgency(user.agencyId?.toString() || "");
     setSelectedClients(user.clientAccess || []);
@@ -420,7 +427,7 @@ export default function AdminPage() {
                   <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                       <DialogTitle>Create New Agency</DialogTitle>
-                      <DialogDescription>Add a new agency to the platform. You can then invite an agency admin to manage it.</DialogDescription>
+                      <DialogDescription>Add a new agency to the platform. You can then add an agency admin to manage it.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
@@ -516,9 +523,9 @@ export default function AdminPage() {
                 </CardHeader>
                 <CardContent className="text-sm text-muted-foreground space-y-2">
                   <p>1. <strong>Create an agency</strong> using the button above</p>
-                  <p>2. <strong>Go to Users tab</strong> and click "Invite User"</p>
-                  <p>3. <strong>Select "agency_admin" role</strong> and assign them to the new agency</p>
-                  <p>4. <strong>Share the invite link</strong> with the agency admin</p>
+                  <p>2. <strong>Go to Users tab</strong> and click "Add User"</p>
+                  <p>3. <strong>Select "Agency Admin" role</strong>, assign them to the new agency and set a password</p>
+                  <p>4. <strong>Share the login details</strong> with the agency admin</p>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -531,126 +538,101 @@ export default function AdminPage() {
                   <h3 className="text-lg font-medium">User Management</h3>
                   <p className="text-sm text-muted-foreground">Manage user roles and permissions across agencies.</p>
                 </div>
-                <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) resetInviteForm(); }}>
+                <Dialog open={addUserOpen} onOpenChange={(open) => { setAddUserOpen(open); if (open) resetAddUserForm(); }}>
                   <DialogTrigger asChild>
-                    <Button data-testid="button-invite-user">
+                    <Button data-testid="button-add-user">
                       <Plus className="mr-2 h-4 w-4" />
-                      Invite User
+                      Add User
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                      <DialogTitle>Invite New User</DialogTitle>
+                      <DialogTitle>Add User</DialogTitle>
+                      <DialogDescription>They sign in with this email and password.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
-                      {!generatedLink ? (
-                        <>
-                          <div className="space-y-2">
-                            <Label>Email (optional)</Label>
-                            <Input
-                              type="email"
-                              placeholder="user@example.com"
-                              value={inviteEmail}
-                              onChange={(e) => setInviteEmail(e.target.value)}
-                              data-testid="input-invite-email"
-                            />
-                            <p className="text-xs text-muted-foreground">If provided, the invite will be associated with this email.</p>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <Label>Role</Label>
-                            <Select value={inviteRole} onValueChange={setInviteRole}>
-                              <SelectTrigger data-testid="select-invite-role">
-                                <SelectValue placeholder="Select role" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="owner">Owner (Super Admin)</SelectItem>
-                                <SelectItem value="agency_admin">Agency Admin</SelectItem>
-                                <SelectItem value="agency_employee">Agency Employee</SelectItem>
-                                <SelectItem value="agency_client">Agency Client</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="new-user-email">Email</Label>
+                        <Input
+                          id="new-user-email"
+                          type="email"
+                          placeholder="user@example.com"
+                          value={newUserEmail}
+                          onChange={(e) => setNewUserEmail(e.target.value)}
+                          data-testid="input-new-user-email"
+                        />
+                      </div>
 
-                          {(inviteRole === "agency_admin" || inviteRole === "agency_employee" || inviteRole === "agency_client") && (
-                            <div className="space-y-2">
-                              <Label>Agency</Label>
-                              <Select value={inviteAgency} onValueChange={setInviteAgency}>
-                                <SelectTrigger data-testid="select-invite-agency">
-                                  <SelectValue placeholder="Select agency" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {agencies.map((agency) => (
-                                    <SelectItem key={agency.id} value={agency.id.toString()}>
-                                      {agency.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
+                      <div className="space-y-2">
+                        <Label htmlFor="new-user-password">Password</Label>
+                        <PasswordField id="new-user-password" value={newUserPassword} onChange={setNewUserPassword} />
+                      </div>
 
-                          {(inviteRole === "agency_employee" || inviteRole === "agency_client") && inviteAgency && (
-                            <div className="space-y-2">
-                              <Label>Assigned Clients</Label>
-                              <div className="grid gap-2 max-h-48 overflow-y-auto border rounded-md p-2">
-                                {clients
-                                  .filter(c => c.agencyId === parseInt(inviteAgency))
-                                  .map((client) => (
-                                    <div key={client.id} className="flex items-center space-x-2">
-                                      <Switch
-                                        id={`invite-client-${client.id}`}
-                                        checked={inviteClients.includes(client.id)}
-                                        onCheckedChange={() => toggleInviteClient(client.id)}
-                                        data-testid={`switch-invite-client-${client.id}`}
-                                      />
-                                      <Label htmlFor={`invite-client-${client.id}`} className="text-sm">
-                                        {client.name}
-                                      </Label>
-                                    </div>
-                                  ))}
-                              </div>
-                            </div>
-                          )}
+                      <div className="space-y-2">
+                        <Label>Role</Label>
+                        <Select value={newUserRole} onValueChange={setNewUserRole}>
+                          <SelectTrigger data-testid="select-new-user-role">
+                            <SelectValue placeholder="Select role" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="owner">Owner (Super Admin)</SelectItem>
+                            <SelectItem value="agency_admin">Agency Admin</SelectItem>
+                            <SelectItem value="agency_employee">Agency Employee</SelectItem>
+                            <SelectItem value="agency_client">Agency Client</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                          <Button 
-                            onClick={handleCreateInvite} 
-                            className="w-full"
-                            disabled={createInviteMutation.isPending || ((inviteRole === "agency_admin" || inviteRole === "agency_employee" || inviteRole === "agency_client") && !inviteAgency)}
-                            data-testid="button-generate-invite"
-                          >
-                            {createInviteMutation.isPending ? "Generating..." : "Generate Invite Link"}
-                          </Button>
-                        </>
-                      ) : (
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                            <Link className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            <Input 
-                              value={generatedLink} 
-                              readOnly 
-                              className="border-0 bg-transparent text-sm"
-                              data-testid="input-generated-link"
-                            />
-                          </div>
-                          <Button 
-                            onClick={() => copyToClipboard(generatedLink)} 
-                            className="w-full"
-                            data-testid="button-copy-link"
-                          >
-                            <Copy className="mr-2 h-4 w-4" />
-                            Copy Link
-                          </Button>
-                          <Button 
-                            onClick={resetInviteForm} 
-                            variant="outline"
-                            className="w-full"
-                            data-testid="button-create-another"
-                          >
-                            Create Another Invite
-                          </Button>
+                      {(newUserRole === "agency_admin" || newUserRole === "agency_employee" || newUserRole === "agency_client") && (
+                        <div className="space-y-2">
+                          <Label>Agency</Label>
+                          <Select value={newUserAgency} onValueChange={setNewUserAgency}>
+                            <SelectTrigger data-testid="select-new-user-agency">
+                              <SelectValue placeholder="Select agency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {agencies.map((agency) => (
+                                <SelectItem key={agency.id} value={agency.id.toString()}>
+                                  {agency.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       )}
+
+                      {(newUserRole === "agency_employee" || newUserRole === "agency_client") && newUserAgency && (
+                        <div className="space-y-2">
+                          <Label>{newUserRole === "agency_client" ? "Workspace (choose one)" : "Assigned Clients"}</Label>
+                          <div className="grid gap-2 max-h-48 overflow-y-auto border rounded-md p-2">
+                            {clients
+                              .filter(c => c.agencyId === parseInt(newUserAgency))
+                              .map((client) => (
+                                <div key={client.id} className="flex items-center space-x-2">
+                                  <Switch
+                                    id={`new-user-client-${client.id}`}
+                                    checked={newUserClients.includes(client.id)}
+                                    onCheckedChange={() => toggleNewUserClient(client.id)}
+                                    data-testid={`switch-new-user-client-${client.id}`}
+                                  />
+                                  <Label htmlFor={`new-user-client-${client.id}`} className="text-sm">
+                                    {client.name}
+                                  </Label>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <Button
+                        onClick={handleCreateUser}
+                        className="w-full"
+                        disabled={createUserMutation.isPending || !newUserEmail.trim() || newUserPassword.length < 8 ||
+                          ((newUserRole === "agency_admin" || newUserRole === "agency_employee" || newUserRole === "agency_client") && !newUserAgency)}
+                        data-testid="button-create-user"
+                      >
+                        {createUserMutation.isPending ? "Creating..." : "Create User"}
+                      </Button>
                     </div>
                   </DialogContent>
                 </Dialog>
@@ -691,12 +673,12 @@ export default function AdminPage() {
                               data-testid={`button-edit-user-${user.id}`}
                             >
                               <Shield className="mr-2 h-4 w-4" />
-                              Manage Role
+                              Manage
                             </Button>
                           </DialogTrigger>
                           <DialogContent className="sm:max-w-md">
                             <DialogHeader>
-                              <DialogTitle>Manage User Role</DialogTitle>
+                              <DialogTitle>Manage User</DialogTitle>
                             </DialogHeader>
                             <div className="space-y-4 py-4">
                               <div className="space-y-2">
@@ -723,7 +705,7 @@ export default function AdminPage() {
                                   {selectedRole === "owner" && "Can see all agencies and all clients."}
                                   {selectedRole === "agency_admin" && "Can see their agency and its clients."}
                                   {selectedRole === "agency_employee" && "Can only see assigned clients."}
-                                  {selectedRole === "agency_client" && "Limited view: Dashboard, Masterclass Tracker, Projections, Training Lab only."}
+                                  {selectedRole === "agency_client" && "Limited view of their one workspace: Dashboard, Neo AI, Marketing Calendar, Live Sales Feed, Event Tracker, Projections, Training Lab, Notifications."}
                                 </p>
                               </div>
 
@@ -779,6 +761,38 @@ export default function AdminPage() {
                               >
                                 {updateRoleMutation.isPending ? "Saving..." : "Save Changes"}
                               </Button>
+
+                              <div className="space-y-2 border-t pt-4">
+                                <Label htmlFor={`reset-password-${user.id}`} className="flex items-center gap-2">
+                                  <KeyRound className="h-4 w-4" /> Reset password
+                                </Label>
+                                <PasswordField id={`reset-password-${user.id}`} value={resetPassword} onChange={setResetPassword} />
+                                <Button
+                                  variant="outline"
+                                  className="w-full"
+                                  onClick={() => resetPasswordMutation.mutate({ user, password: resetPassword })}
+                                  disabled={resetPassword.length < 8 || resetPasswordMutation.isPending}
+                                  data-testid={`button-reset-password-${user.id}`}
+                                >
+                                  {resetPasswordMutation.isPending ? "Saving..." : "Set new password"}
+                                </Button>
+                              </div>
+
+                              {user.id !== currentUser?.id && (
+                                <Button
+                                  variant="ghost"
+                                  className="w-full text-destructive hover:text-destructive"
+                                  onClick={() => {
+                                    if (confirm(`Remove ${user.email}? They will no longer be able to sign in.`)) {
+                                      deleteUserMutation.mutate(user.id);
+                                    }
+                                  }}
+                                  disabled={deleteUserMutation.isPending}
+                                  data-testid={`button-remove-user-${user.id}`}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" /> Remove user
+                                </Button>
+                              )}
                             </div>
                           </DialogContent>
                         </Dialog>
@@ -791,69 +805,13 @@ export default function AdminPage() {
                   <Card>
                     <CardContent className="py-12 text-center text-muted-foreground">
                       <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No users have signed up yet.</p>
-                      <p className="text-sm">Users will appear here after they log in for the first time.</p>
+                      <p>No users yet.</p>
+                      <p className="text-sm">Click "Add User" to create one.</p>
                     </CardContent>
                   </Card>
                 )}
               </div>
 
-              {invites.filter(i => !i.usedAt).length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-medium">Pending Invites</h3>
-                  <div className="grid gap-4">
-                    {invites.filter(i => !i.usedAt).map((invite) => (
-                      <Card key={invite.id} data-testid={`card-invite-${invite.id}`}>
-                        <CardContent className="flex items-center justify-between py-4">
-                          <div className="flex items-center gap-4">
-                            <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                              <Mail className="h-5 w-5 text-muted-foreground" />
-                            </div>
-                            <div>
-                              <div className="font-medium">
-                                {invite.email || "No email specified"}
-                              </div>
-                              <div className="text-sm text-muted-foreground">
-                                Role: {invite.role} {invite.agencyId ? `• Agency ${invite.agencyId}` : ""}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {invite.email && invite.role === "agency_client" && invite.clientAccess?.length === 1 && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={sendInviteMutation.isPending || !!(invite.expiresAt && new Date(invite.expiresAt) < new Date())}
-                                onClick={() => sendInviteMutation.mutate(invite.id)}
-                                data-testid={`button-send-invite-${invite.id}`}
-                              >
-                                <Mail className="h-4 w-4 mr-2" /> Send email
-                              </Button>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => copyToClipboard(`${window.location.origin}/api/login?invite_token=${invite.token}`)}
-                              data-testid={`button-copy-invite-${invite.id}`}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => deleteInviteMutation.mutate(invite.id)}
-                              disabled={deleteInviteMutation.isPending}
-                              data-testid={`button-delete-invite-${invite.id}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
             </TabsContent>
           )}
 
@@ -1110,6 +1068,7 @@ export default function AdminPage() {
           </TabsContent>
         </Tabs>
       </div>
+      <LoginDetailsDialog details={loginDetails} onClose={() => setLoginDetails(null)} />
     </AppLayout>
   );
 }

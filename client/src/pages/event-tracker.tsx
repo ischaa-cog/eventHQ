@@ -60,6 +60,7 @@ import {
 } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/hooks/useAuth";
+import { MasterclassGoalsCard, type MasterclassActuals } from "@/components/MasterclassGoalsCard";
 
 interface ProductItem {
   id: string;
@@ -78,6 +79,7 @@ interface EventPerformance {
   numberOfDays: number;
   totalRegistrants: number;
   totalAttendees: number;
+  peopleAtPitch?: number;
   adSpend: string;
   offerType: string;
   salesData: ProductItem[] | null;
@@ -150,6 +152,7 @@ interface EventFormData {
   numberOfDays: number;
   totalRegistrants: number;
   totalAttendees: number;
+  peopleAtPitch: number;
   adSpend: string;
   offerType: string;
   salesData: ProductItem[];
@@ -173,6 +176,7 @@ const initialFormData: EventFormData = {
   numberOfDays: 1,
   totalRegistrants: 0,
   totalAttendees: 0,
+  peopleAtPitch: 0,
   adSpend: "0",
   offerType: "tickets",
   salesData: [],
@@ -324,7 +328,7 @@ export default function EventTrackerPage() {
     enabled: !!clientId,
   });
 
-  const { data: webinarGoal, isLoading: isLoadingWebinarGoal, isError: isWebinarGoalError } = useQuery<WebinarGoal | null>({
+  const { data: webinarGoal } = useQuery<WebinarGoal | null>({
     queryKey: [`/api/clients/${clientId}/webinar-goals`],
     queryFn: async () => {
       const res = await fetch(`/api/clients/${clientId}/webinar-goals`);
@@ -345,7 +349,7 @@ export default function EventTrackerPage() {
           endDate: data.endDate ? new Date(data.endDate).toISOString() : null,
         }),
       });
-      if (!res.ok) throw new Error("Failed to create event");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to create event");
       return res.json();
     },
     onSuccess: () => {
@@ -370,7 +374,7 @@ export default function EventTrackerPage() {
           endDate: data.endDate ? new Date(data.endDate).toISOString() : null,
         }),
       });
-      if (!res.ok) throw new Error("Failed to update event");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to update event");
       return res.json();
     },
     onSuccess: () => {
@@ -436,6 +440,7 @@ export default function EventTrackerPage() {
         numberOfDays: fullEvent.numberOfDays || 1,
         totalRegistrants: fullEvent.totalRegistrants,
         totalAttendees: fullEvent.totalAttendees,
+        peopleAtPitch: fullEvent.peopleAtPitch ?? 0,
         adSpend: fullEvent.adSpend,
         offerType: fullEvent.offerType || "tickets",
          salesData: normalizedSales,
@@ -673,6 +678,33 @@ export default function EventTrackerPage() {
     ? historicalWebinarMetrics.totalRevenue / historicalWebinarMetrics.totalAdSpend
     : 0;
 
+  const masterclassEvents = events.filter(e => e.eventType === "webinar").filter(isEventInDateRange);
+  const masterclassTotals = masterclassEvents.reduce((acc, e) => {
+    const metrics = calculateMetrics(e);
+    return {
+      registrants: acc.registrants + (e.totalRegistrants || 0),
+      attendees: acc.attendees + (e.totalAttendees || 0),
+      sales: acc.sales + metrics.totalSales,
+      revenue: acc.revenue + metrics.totalRevenue,
+      adSpend: acc.adSpend + (parseFloat(e.adSpend || "0") || 0),
+    };
+  }, { registrants: 0, attendees: 0, sales: 0, revenue: 0, adSpend: 0 });
+  const masterclassActuals: MasterclassActuals = {
+    masterclasses: masterclassEvents.length,
+    revenue: masterclassTotals.revenue,
+    registrants: masterclassTotals.registrants,
+    attendeeRate: masterclassTotals.registrants > 0 ? (masterclassTotals.attendees / masterclassTotals.registrants) * 100 : null,
+    closingRate: masterclassTotals.attendees > 0 ? (masterclassTotals.sales / masterclassTotals.attendees) * 100 : null,
+    roas: masterclassTotals.adSpend > 0 ? masterclassTotals.revenue / masterclassTotals.adSpend : null,
+  };
+  const periodLabel = {
+    all: "All time",
+    "7days": "Last 7 days",
+    "30days": "Last 30 days",
+    thisMonth: "This month",
+    custom: "Custom dates",
+  }[dateFilterType];
+
   const previewMetrics = calculateMetrics(formData);
 
   // Prepare chart data from filtered events (sorted by date)
@@ -838,12 +870,20 @@ export default function EventTrackerPage() {
             </div>
           </div>
 
+          <MasterclassGoalsCard
+            clientId={clientId}
+            goal={webinarGoal}
+            actuals={masterclassActuals}
+            periodLabel={periodLabel}
+            canEdit={canManageActuals}
+          />
+
           {/* Legacy masterclass records remain available here as read-only history. */}
           <section className="mb-8 space-y-4" aria-labelledby="historical-masterclasses-heading">
             <div>
               <h2 id="historical-masterclasses-heading" className="text-xl font-semibold text-white">Historical Masterclass Reporting</h2>
               <p className="mt-1 text-sm text-gray-400">
-                Legacy masterclass records, sales breakdowns, and their original goal targets. These are shown separately from Event Tracker actuals.
+                Legacy masterclass records and sales breakdowns from the old Masterclass Tracker. These are shown separately from Event Tracker actuals.
               </p>
             </div>
             {isHistoricalWebinarsError ? (
@@ -878,50 +918,6 @@ export default function EventTrackerPage() {
                     </Card>
                   ))}
                 </div>
-
-                <Card className="bg-gray-900 border-gray-800">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-white">
-                      <Target className="h-5 w-5 text-blue-500" />
-                      Historical Masterclass Goal
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {isWebinarGoalError ? (
-                      <p className="text-sm text-red-400">Unable to load the historical masterclass goal.</p>
-                    ) : isLoadingWebinarGoal ? (
-                      <p className="text-sm text-gray-400">Loading masterclass goal...</p>
-                    ) : !webinarGoal ? (
-                      <p className="text-sm text-gray-400">No historical masterclass goal has been set.</p>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium text-white">{webinarGoal.name || "Masterclass Goals"}</p>
-                          <Badge variant="outline" className="border-gray-700 text-gray-300">
-                            {webinarGoal.periodType || "all-time"}
-                          </Badge>
-                          {!webinarGoal.isActive && <Badge variant="secondary">Inactive</Badge>}
-                          <span className="text-xs text-gray-500">Targets are read-only in Event Tracker.</span>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                          {[
-                            { label: "Revenue", target: `$${Number(webinarGoal.targetRevenue || 0).toLocaleString()}`, actual: `$${historicalWebinarMetrics.totalRevenue.toLocaleString()}` },
-                            { label: "Masterclasses", target: Number(webinarGoal.targetWebinars || 0).toLocaleString(), actual: historicalWebinarMetrics.totalWebinars.toLocaleString() },
-                            { label: "Registrants", target: Number(webinarGoal.targetRegistrants || 0).toLocaleString(), actual: historicalWebinarMetrics.totalRegistrants.toLocaleString() },
-                            { label: "Attendee Rate", target: `${parseFloat(webinarGoal.targetAttendeeRate || "0").toLocaleString()}%`, actual: `${historicalAvgAttendeeRate.toFixed(1)}%` },
-                            { label: "Closing Rate", target: `${parseFloat(webinarGoal.targetClosingRate || "0").toLocaleString()}%`, actual: `${historicalAvgClosingRate.toFixed(1)}%` },
-                            { label: "ROAS", target: `${parseFloat(webinarGoal.targetRoas || "0").toLocaleString()}x`, actual: `${historicalRoas.toFixed(2)}x` },
-                          ].map((item) => (
-                            <div key={item.label} className="rounded-md border border-gray-800 bg-gray-950/60 p-3">
-                              <p className="text-xs text-gray-400">{item.label}</p>
-                              <p className="mt-1 text-sm text-white">{item.actual} <span className="text-gray-500">/ {item.target} target</span></p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
 
                 <Card className="bg-gray-900 border-gray-800">
                   <CardHeader>
@@ -1399,7 +1395,7 @@ export default function EventTrackerPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="totalRegistrants" className="text-gray-300">Total Registrants</Label>
                 <Input
@@ -1421,6 +1417,21 @@ export default function EventTrackerPage() {
                   className="bg-gray-800 border-gray-700 text-white"
                   data-testid="input-attendees"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="peopleAtPitch" className="text-gray-300">People at Pitch</Label>
+                <Input
+                  id="peopleAtPitch"
+                  type="number"
+                  min="0"
+                  value={formData.peopleAtPitch}
+                  onChange={(e) => setFormData(prev => ({ ...prev, peopleAtPitch: parseInt(e.target.value) || 0 }))}
+                  className="bg-gray-800 border-gray-700 text-white"
+                  data-testid="input-people-at-pitch"
+                />
+                {formData.peopleAtPitch > formData.totalAttendees && (
+                  <p className="text-xs text-red-400">Can't be more than attendees.</p>
+                )}
               </div>
             </div>
 
@@ -1729,7 +1740,7 @@ export default function EventTrackerPage() {
           
           {selectedEvent && (
             <div className="space-y-6">
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-5 gap-4">
                 <Card className="bg-gray-800 border-gray-700">
                   <CardContent className="p-4 text-center">
                     <div className="text-gray-400 text-xs mb-1">Registrants</div>
@@ -1743,6 +1754,18 @@ export default function EventTrackerPage() {
                     <div className="text-gray-500 text-xs">
                       {selectedEvent.totalRegistrants > 0 
                         ? `${((selectedEvent.totalAttendees / selectedEvent.totalRegistrants) * 100).toFixed(1)}%`
+                        : "0%"
+                      }
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-gray-800 border-gray-700" data-testid="card-people-at-pitch">
+                  <CardContent className="p-4 text-center">
+                    <div className="text-gray-400 text-xs mb-1">At Pitch</div>
+                    <div className="text-white text-xl font-bold">{selectedEvent.peopleAtPitch ?? 0}</div>
+                    <div className="text-gray-500 text-xs">
+                      {selectedEvent.totalAttendees > 0
+                        ? `${(((selectedEvent.peopleAtPitch ?? 0) / selectedEvent.totalAttendees) * 100).toFixed(1)}% of attendees`
                         : "0%"
                       }
                     </div>

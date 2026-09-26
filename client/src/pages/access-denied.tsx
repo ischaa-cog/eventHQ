@@ -26,8 +26,7 @@ export default function AccessDenied() {
               <div>
                 <p className="text-sm text-gray-300 font-medium">Need access?</p>
                 <p className="text-sm text-gray-500">
-                  Contact your agency administrator to request an invitation. 
-                  Once invited, you'll be able to sign in with the same account.
+                  Contact your agency administrator for your login details.
                 </p>
               </div>
             </div>

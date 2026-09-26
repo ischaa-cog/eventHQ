@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, MoreHorizontal, Trash2, Pencil, Mail, UserCheck, UserX } from "lucide-react";
+import { Plus, MoreHorizontal, Trash2, Pencil, KeyRound, UserCheck, UserX } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useState } from "react";
+import { generatePassword, LoginDetailsDialog, PasswordField, type LoginDetails } from "@/components/LoginDetails";
 
 interface Client {
   id: number;
@@ -78,7 +79,10 @@ export default function ClientsPage() {
   const [newClientNiche, setNewClientNiche] = useState("");
   const [newClientWebsite, setNewClientWebsite] = useState("");
   const [newClientPrimaryOffer, setNewClientPrimaryOffer] = useState("");
-  const [sendInvite, setSendInvite] = useState(true);
+  const [createLogin, setCreateLogin] = useState(true);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState(() => generatePassword());
+  const [loginDetails, setLoginDetails] = useState<LoginDetails | null>(null);
 
   const { data: clients = [], isLoading } = useQuery<Client[]>({
     queryKey: ["/api/clients"],
@@ -99,41 +103,36 @@ export default function ClientsPage() {
     setNewClientNiche("");
     setNewClientWebsite("");
     setNewClientPrimaryOffer("");
-    setSendInvite(true);
+    setCreateLogin(true);
+    setLoginEmail("");
+    setLoginPassword(generatePassword());
   };
 
   const createMutation = useMutation({
-    mutationFn: async (data: Partial<Client> & { sendInvite?: boolean }) => {
+    mutationFn: async (data: Partial<Client> & { login?: { email: string; password: string } }) => {
       const res = await fetch("/api/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to create client");
-      return res.json();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to create client");
+      return body;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
       setAddDialogOpen(false);
       resetFormFields();
-      
-      if (data.inviteSent) {
-        toast({
-          title: "Client Created & Invited",
-          description: `${data.name} has been created and an invite email was sent to ${data.email}.`,
-        });
-      } else if (data.sendInvite && data.inviteError) {
-        toast({
-          title: "Client Created — Invite Not Sent",
-          description: `${data.name} was created, but the email was not sent: ${data.inviteError} Copy the existing invitation link from Admin Settings → User Management → Pending Invites. Do not create this client again.`,
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Client Created",
-          description: `${data.name} has been added to your workspace.`,
-        });
+      toast({
+        title: "Client Created",
+        description: `${data.name} has been added to your workspace.`,
+      });
+      if (data.login && variables.login) {
+        setLoginDetails({ title: `Login for ${data.name}`, email: data.login.email, password: variables.login.password });
       }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Client not created", description: error.message, variant: "destructive" });
     },
   });
 
@@ -223,7 +222,7 @@ export default function ClientsPage() {
       niche: newClientNiche.trim() || undefined,
       website: newClientWebsite.trim() || undefined,
       primaryOffer: newClientPrimaryOffer.trim() || undefined,
-      sendInvite,
+      ...(createLogin ? { login: { email: loginEmail.trim() || newClientEmail.trim(), password: loginPassword } } : {}),
     });
   };
 
@@ -521,22 +520,43 @@ export default function ClientsPage() {
               </div>
             </div>
 
-            <div className="flex items-center space-x-3 p-4 rounded-lg bg-primary/5 border border-primary/20">
-              <Checkbox
-                id="send-invite"
-                checked={sendInvite}
-                onCheckedChange={(checked) => setSendInvite(checked as boolean)}
-                data-testid="checkbox-send-invite"
-              />
-              <div className="space-y-1">
-                <Label htmlFor="send-invite" className="flex items-center gap-2 cursor-pointer">
-                  <Mail className="h-4 w-4 text-primary" />
-                  Invite this client to EventHQ
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  They will receive an email with a link to create their account and access their workspace.
-                </p>
+            <div className="space-y-3 p-4 rounded-lg bg-primary/5 border border-primary/20">
+              <div className="flex items-center space-x-3">
+                <Checkbox
+                  id="create-login"
+                  checked={createLogin}
+                  onCheckedChange={(checked) => setCreateLogin(checked as boolean)}
+                  data-testid="checkbox-create-login"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="create-login" className="flex items-center gap-2 cursor-pointer">
+                    <KeyRound className="h-4 w-4 text-primary" />
+                    Create a client login
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    The client signs in with this email and password and sees only this workspace.
+                  </p>
+                </div>
               </div>
+              {createLogin && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="login-email">Login email</Label>
+                    <Input
+                      id="login-email"
+                      type="email"
+                      placeholder={newClientEmail.trim() || "Same as client email"}
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      data-testid="input-login-email"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="login-password">Password</Label>
+                    <PasswordField id="login-password" value={loginPassword} onChange={setLoginPassword} />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -545,10 +565,10 @@ export default function ClientsPage() {
             </Button>
             <Button 
               onClick={handleCreateClient} 
-              disabled={!newClientName.trim() || !newClientEmail.trim() || createMutation.isPending}
+              disabled={!newClientName.trim() || !newClientEmail.trim() || (createLogin && loginPassword.length < 8) || createMutation.isPending}
               data-testid="button-save-client"
             >
-              {createMutation.isPending ? "Creating..." : sendInvite ? "Create & Invite Client" : "Create Client"}
+              {createMutation.isPending ? "Creating..." : createLogin ? "Create Client & Login" : "Create Client"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -701,6 +721,7 @@ export default function ClientsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <LoginDetailsDialog details={loginDetails} onClose={() => setLoginDetails(null)} />
     </AppLayout>
   );
 }

@@ -13,3 +13,5 @@ zipFile.zip
 .local/
 .cache/
 .upm/
+# Feedback recordings (large, not code)
+loom/

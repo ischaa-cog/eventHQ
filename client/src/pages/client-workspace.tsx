@@ -39,6 +39,7 @@ import { Upload, FileText, Trash2, Eye, Pencil, Save, Check, Camera, RefreshCw, 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { ClientAccessCard } from "@/components/ClientAccessCard";
 
 interface VaultAsset {
   id: number;
@@ -741,6 +742,15 @@ export default function ClientWorkspacePage() {
             >
               Webhook Settings
             </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger 
+                value="access" 
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                data-testid="tab-access"
+              >
+                Client Access
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <div className="mt-6">
@@ -1161,6 +1171,12 @@ export default function ClientWorkspacePage() {
                 </>
               ) : <p className="text-sm text-muted-foreground">Connection settings are managed by your administrator.</p>}
             </TabsContent>
+
+            {isAdmin && (
+              <TabsContent value="access" className="space-y-6">
+                <ClientAccessCard clientId={clientId} clientName={clientName} clientEmail={client?.email} />
+              </TabsContent>
+            )}
           </div>
         </Tabs>
       </div>

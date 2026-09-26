@@ -13,11 +13,9 @@ import React, { Component, ErrorInfo, ReactNode } from "react";
 
 import ClientsPage from "@/pages/clients";
 import ClientWorkspacePage from "@/pages/client-workspace";
-import EventBuilderPage from "@/pages/event-builder";
 import AssetsPage from "@/pages/assets";
 import ClientProjectionsPage from "@/pages/projections";
 import ClientDashboard from "@/pages/client-dashboard";
-import WebinarTrackerPage from "@/pages/webinar-tracker";
 import EventTrackerPage from "@/pages/event-tracker";
 import TrainingLabPage from "@/pages/training-lab";
 import MarketingCalendarPage from "@/pages/marketing-calendar";
@@ -27,7 +25,7 @@ import ClientNotificationsPage from "@/pages/client-notifications";
 import ClientOnboardingPage from "@/pages/client-onboarding";
 import AccessDeniedPage from "@/pages/access-denied";
 import LiveSalesFeedPage from "@/pages/live-sales-feed";
-import TalkToTuckPage from "@/pages/talk-to-tuck";
+import TalkToNeoPage from "@/pages/talk-to-neo";
 import AdminPage from "@/pages/admin";
 
 interface ErrorBoundaryState {
@@ -138,7 +136,7 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|calendar|sales|events|projections|training|notifications|tuck)$/);
+  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|calendar|sales|events|projections|training|notifications|neo)$/);
   if (!clientPath || Number(clientPath[1]) !== clients.data?.[0]?.id) return <AccessDeniedPage />;
   return <>{children}</>;
 }
@@ -196,16 +194,17 @@ function Router() {
       <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
       <Route path="/client/:id/onboarding" component={() => <InternalOnlyFeature><ClientOnboardingPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/workspace" component={() => <InternalOnlyFeature><ClientWorkspacePage /></InternalOnlyFeature>} />
-      <Route path="/client/:id/event-builder" component={() => <InternalOnlyFeature><EventBuilderPage /></InternalOnlyFeature>} />
+      {/* Event Builder (client/src/pages/event-builder.tsx) is hidden for now; re-add its route here to bring it back. */}
       <Route path="/client/:id/assets" component={() => <InternalOnlyFeature><AssetsPage /></InternalOnlyFeature>} />
-      <Route path="/client/:id/webinars" component={() => <InternalOnlyFeature><WebinarTrackerPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/events" component={() => <ClientPortalFeature><EventTrackerPage /></ClientPortalFeature>} />
       <Route path="/client/:id/projections" component={() => <ClientPortalFeature><ClientProjectionsPage /></ClientPortalFeature>} />
       <Route path="/client/:id/training" component={() => <ClientPortalFeature><TrainingLabPage /></ClientPortalFeature>} />
       <Route path="/client/:id/calendar" component={() => <ClientPortalFeature><MarketingCalendarPage /></ClientPortalFeature>} />
       <Route path="/client/:id/sales" component={() => <ClientPortalFeature><LiveSalesFeedPage /></ClientPortalFeature>} />
       <Route path="/client/:id/notifications" component={() => <ClientPortalFeature><ClientNotificationsPage /></ClientPortalFeature>} />
-      <Route path="/client/:id/tuck" component={() => <ClientPortalFeature><TalkToTuckPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/neo" component={() => <ClientPortalFeature><TalkToNeoPage /></ClientPortalFeature>} />
+      {/* Old address from before the Tuck → Neo rename; keeps saved links working. */}
+      <Route path="/client/:id/tuck">{(params) => <Redirect to={`/client/${params.id}/neo`} replace />}</Route>
 
       <Route component={NotFound} />
     </Switch>

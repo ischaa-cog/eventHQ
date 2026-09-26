@@ -3,7 +3,6 @@ import pg from "pg";
 import { eq, desc, and, gte, lte, sql, inArray, isNull, or, ilike } from "drizzle-orm";
 import {
   type User,
-  type UpsertUser,
   type Client,
   type InsertClient,
   type Event,
@@ -18,8 +17,6 @@ import {
   type InsertSale,
   type Webinar,
   type InsertWebinar,
-  type Invite,
-  type InsertInvite,
   type WebinarGoal,
   type InsertWebinarGoal,
   type TrainingModule,
@@ -47,6 +44,8 @@ import {
   type TuckMessage,
   type InsertTuckMessage,
   users,
+  userCredentials,
+  demoCredentials,
   agencies,
   clients,
   events,
@@ -70,6 +69,7 @@ import {
   tuckChats,
   tuckMessages,
 } from "@shared/schema";
+import { hashPassword } from "./passwords";
 
 const { Pool } = pg;
 
@@ -79,14 +79,46 @@ const pool = new Pool({
 
 export const db = drizzle(pool);
 
+export type NewLoginUser = {
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  role: string;
+  agencyId?: number | null;
+  clientAccess?: number[] | null;
+};
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// Session rows are keyed by sid; the signed-in user id sits inside the JSON.
+function sessionsOfUser(userId: string) {
+  return sql`DELETE FROM sessions WHERE sess->'passport'->'user'->'claims'->>'sub' = ${userId}`;
+}
+
+// Removes a user plus everything that would block the delete, and signs them out.
+async function deleteUserRows(tx: Tx, userId: string): Promise<void> {
+  await tx.delete(userCredentials).where(eq(userCredentials.userId, userId));
+  await tx.delete(demoCredentials).where(eq(demoCredentials.userId, userId));
+  await tx.update(invites).set({ createdById: null }).where(eq(invites.createdById, userId));
+  await tx.update(invites).set({ usedById: null }).where(eq(invites.usedById, userId));
+  await tx.update(notifications).set({ senderUserId: null }).where(eq(notifications.senderUserId, userId));
+  await tx.delete(users).where(eq(users.id, userId));
+  await tx.execute(sessionsOfUser(userId));
+}
+
 export interface IStorage {
-  // Users (for Replit Auth)
+  // Users (email + password login)
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  bootstrapOwnerIfFirst(user: UpsertUser): Promise<User | undefined>;
-  upsertUser(user: UpsertUser): Promise<User>;
   getAllUsers(): Promise<User[]>;
   updateUserRole(id: string, role: string, agencyId?: number, clientAccess?: number[]): Promise<User | undefined>;
+  getPasswordHash(userId: string): Promise<string | undefined>;
+  createUserWithPassword(user: NewLoginUser, password: string): Promise<User>;
+  setUserPassword(userId: string, password: string): Promise<void>;
+  deleteUser(userId: string): Promise<void>;
+  getClientUsers(clientId: number): Promise<User[]>;
+  endClientSessions(clientId: number): Promise<void>;
+  createClientWithLogin(client: InsertClient, login: { email: string; password: string }): Promise<{ client: Client; user: User }>;
 
   // Agencies
   getAllAgencies(): Promise<any[]>;
@@ -137,15 +169,6 @@ export interface IStorage {
   createSale(sale: InsertSale): Promise<Sale>;
   getClientByWebhookToken(token: string): Promise<Client | undefined>;
   regenerateWebhookToken(clientId: number): Promise<string | undefined>;
-
-  // Invites
-  createInvite(invite: InsertInvite): Promise<Invite>;
-  getInviteByToken(token: string): Promise<Invite | undefined>;
-  getInviteByEmail(email: string): Promise<Invite | undefined>;
-  getInvitesByAgency(agencyId: number): Promise<Invite[]>;
-  getAllInvites(): Promise<Invite[]>;
-  markInviteUsed(token: string, userId: string): Promise<Invite | undefined>;
-  deleteInvite(id: number): Promise<boolean>;
 
   // Meta Ads
   updateClientMetaAds(
@@ -255,7 +278,7 @@ export interface IStorage {
   createEventGoals(goals: InsertEventGoal): Promise<EventGoal>;
   updateEventGoals(clientId: number, eventType: string | null, goals: Partial<InsertEventGoal>): Promise<EventGoal | undefined>;
 
-  // Tuck AI Chats
+  // Neo AI chats (tables keep their original tuck_* names)
   getTuckChats(clientId: number): Promise<TuckChat[]>;
   getTuckChat(id: number): Promise<TuckChat | undefined>;
   createTuckChat(chat: InsertTuckChat): Promise<TuckChat>;
@@ -266,48 +289,77 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  // Users (for Replit Auth)
+  // Users (email + password login)
   async getUser(id: string): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
     return result[0];
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const result = await db.select().from(users)
+      .where(sql`lower(${users.email}) = ${email.trim().toLowerCase()}`).limit(1);
     return result[0];
   }
 
-  async bootstrapOwnerIfFirst(userData: UpsertUser): Promise<User | undefined> {
-    return await db.transaction(async (tx) => {
-      // Serialize first-run claims so concurrent sign-ins cannot create multiple owners.
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(824617)`);
-      const existingUsers = await tx.select({ id: users.id }).from(users).limit(1);
-      if (existingUsers.length > 0) return undefined;
+  async getPasswordHash(userId: string): Promise<string | undefined> {
+    const result = await db.select({ passwordHash: userCredentials.passwordHash })
+      .from(userCredentials).where(eq(userCredentials.userId, userId)).limit(1);
+    return result[0]?.passwordHash;
+  }
 
-      const [owner] = await tx
-        .insert(users)
-        .values({ ...userData, role: "owner" })
+  async createUserWithPassword(userData: NewLoginUser, password: string): Promise<User> {
+    const passwordHash = await hashPassword(password);
+    return await db.transaction(async (tx) => {
+      const [user] = await tx.insert(users)
+        .values({ ...userData, email: userData.email.trim().toLowerCase() })
         .returning();
-      return owner;
+      await tx.insert(userCredentials).values({ userId: user.id, passwordHash });
+      return user;
     });
   }
 
-  async upsertUser(userData: UpsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(userData)
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          email: userData.email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          profileImageUrl: userData.profileImageUrl,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-    return user;
+  async setUserPassword(userId: string, password: string): Promise<void> {
+    const passwordHash = await hashPassword(password);
+    await db.transaction(async (tx) => {
+      await tx.insert(userCredentials).values({ userId, passwordHash })
+        .onConflictDoUpdate({ target: userCredentials.userId, set: { passwordHash, updatedAt: new Date() } });
+      // A changed password signs the user out everywhere.
+      await tx.execute(sessionsOfUser(userId));
+    });
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      await deleteUserRows(tx, userId);
+    });
+  }
+
+  async getClientUsers(clientId: number): Promise<User[]> {
+    return await db.select().from(users)
+      .where(and(eq(users.role, "agency_client"), sql`${clientId} = ANY(${users.clientAccess})`))
+      .orderBy(desc(users.createdAt));
+  }
+
+  async endClientSessions(clientId: number): Promise<void> {
+    for (const user of await this.getClientUsers(clientId)) await db.execute(sessionsOfUser(user.id));
+  }
+
+  async createClientWithLogin(
+    clientData: InsertClient,
+    login: { email: string; password: string },
+  ): Promise<{ client: Client; user: User }> {
+    const passwordHash = await hashPassword(login.password);
+    return await db.transaction(async (tx) => {
+      const [client] = await tx.insert(clients).values(clientData).returning();
+      const [user] = await tx.insert(users).values({
+        email: login.email.trim().toLowerCase(),
+        role: "agency_client",
+        agencyId: client.agencyId,
+        clientAccess: [client.id],
+      }).returning();
+      await tx.insert(userCredentials).values({ userId: user.id, passwordHash });
+      return { client, user };
+    });
   }
 
   async getAllUsers(): Promise<User[]> {
@@ -430,8 +482,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteClient(id: number): Promise<boolean> {
-    const result = await db.delete(clients).where(eq(clients.id, id)).returning();
-    return result.length > 0;
+    return await db.transaction(async (tx) => {
+      // Client logins belong to exactly one workspace, so they go with it.
+      const clientUsers = await tx.select({ id: users.id }).from(users)
+        .where(and(eq(users.role, "agency_client"), sql`${users.clientAccess} = ARRAY[${id}]::integer[]`));
+      for (const user of clientUsers) await deleteUserRows(tx, user.id);
+      const result = await tx.delete(clients).where(eq(clients.id, id)).returning();
+      return result.length > 0;
+    });
   }
 
   // Events
@@ -615,47 +673,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(clients.id, clientId))
       .returning();
     return result[0]?.webhookToken ?? undefined;
-  }
-
-  // Invites
-  async createInvite(invite: InsertInvite): Promise<Invite> {
-    const result = await db.insert(invites).values(invite).returning();
-    return result[0];
-  }
-
-  async getInviteByToken(token: string): Promise<Invite | undefined> {
-    const result = await db.select().from(invites).where(eq(invites.token, token)).limit(1);
-    return result[0];
-  }
-
-  async getInviteByEmail(email: string): Promise<Invite | undefined> {
-    const result = await db.select().from(invites)
-      .where(and(eq(invites.email, email), isNull(invites.usedAt)))
-      .orderBy(desc(invites.createdAt))
-      .limit(1);
-    return result[0];
-  }
-
-  async getInvitesByAgency(agencyId: number): Promise<Invite[]> {
-    return await db.select().from(invites).where(eq(invites.agencyId, agencyId)).orderBy(desc(invites.createdAt));
-  }
-
-  async getAllInvites(): Promise<Invite[]> {
-    return await db.select().from(invites).orderBy(desc(invites.createdAt));
-  }
-
-  async markInviteUsed(token: string, userId: string): Promise<Invite | undefined> {
-    const result = await db
-      .update(invites)
-      .set({ usedAt: new Date(), usedById: userId })
-      .where(eq(invites.token, token))
-      .returning();
-    return result[0];
-  }
-
-  async deleteInvite(id: number): Promise<boolean> {
-    const result = await db.delete(invites).where(eq(invites.id, id)).returning();
-    return result.length > 0;
   }
 
   // Google Drive
@@ -1245,7 +1262,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  // Tuck AI Chats
+  // Neo AI chats (tables keep their original tuck_* names)
   async getTuckChats(clientId: number): Promise<TuckChat[]> {
     return await db.select().from(tuckChats).where(eq(tuckChats.clientId, clientId)).orderBy(desc(tuckChats.updatedAt));
   }

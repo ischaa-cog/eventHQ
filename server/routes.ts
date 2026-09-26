@@ -2,28 +2,20 @@ import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { randomUUID } from "crypto";
 import { storage, db } from "./storage";
-import { insertClientSchema, insertEventSchema, insertAssetSchema, insertVaultAssetSchema, insertWebinarSchema, insertNotificationSchema, insertCalendarEntrySchema, sales as salesTable, salesSources, clientCalendarConnections, invites, notificationRecipients, type User, type Invite } from "@shared/schema";
+import { insertClientSchema, insertEventSchema, insertAssetSchema, insertVaultAssetSchema, insertWebinarSchema, insertNotificationSchema, insertCalendarEntrySchema, sales as salesTable, salesSources, clientCalendarConnections, notificationRecipients, type User } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import OpenAI from "openai";
 import { z } from "zod";
-import { setupAuth, isAuthenticated, enforceDemoReadOnly } from "./replitAuth";
+import { setupAuth, isAuthenticated, enforceDemoReadOnly } from "./auth";
 import sharp from "sharp";
 import { runAssetGeneration, runTemplateBasedGeneration, getAvailableTemplatesForEvent } from "./ai-generation";
 import { getAuthorizationUrl, exchangeCodeForTokens, ensureClientFolder } from "./google-drive";
-import { sendNotificationEmail, sendInviteEmail } from "./email";
+import { sendNotificationEmail } from "./email";
+import { passwordProblem } from "./passwords";
 import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "./googleCalendar";
 import { registerPortalRoutes } from "./portal-routes";
 import { netSaleContribution } from "./sales-math";
 
-function getInviteBaseUrl(): string {
-  const configured = process.env.PUBLIC_APP_URL;
-  const url = configured || (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
-  if (!url || !/^https:\/\/[^/]+\/?$/.test(url)) {
-    throw new Error("Set PUBLIC_APP_URL to the public HTTPS address before sending invitations.");
-  }
-  return url.replace(/\/$/, "");
-}
 
 // Helper to check if user can access a specific client
 async function canAccessClient(user: User | undefined, clientId: number): Promise<boolean> {
@@ -113,6 +105,7 @@ const performanceInputSchema = z.object({
   numberOfDays: z.coerce.number().int().min(1).max(31).optional(),
   totalRegistrants: z.coerce.number().int().nonnegative().optional(),
   totalAttendees: z.coerce.number().int().nonnegative().optional(),
+  peopleAtPitch: z.coerce.number().int().nonnegative().optional(),
   adSpend: z.coerce.number().finite().nonnegative().optional(),
   offerType: z.string().max(100).optional(),
   salesData: z.array(performanceProductSchema).max(100).optional(),
@@ -311,181 +304,184 @@ export function registerApiRoutes(app: Express): void {
     }
   });
 
-  // INVITES (for inviting users with pre-assigned roles)
-  app.post("/api/invites", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const currentUser = await storage.getUser(userId);
-      if (!currentUser || (currentUser.role !== "owner" && currentUser.role !== "agency_admin")) {
-        return res.status(403).json({ error: "Only owners and agency admins can create invites" });
-      }
-      
-      const { email, role, agencyId, clientAccess, expiresAt } = req.body;
-      
-      if (!role) {
-        return res.status(400).json({ error: "Role is required" });
-      }
-      
-      // Prevent privilege escalation: agency_admin cannot create owner invites
-      if (currentUser.role === "agency_admin" && role === "owner") {
-        return res.status(403).json({ error: "Agency admins cannot create owner invites" });
-      }
-      
-      // Determine the agency ID for the invite
-      let inviteAgencyId: number | undefined;
-      if (currentUser.role === "agency_admin") {
-        // Agency admins can only invite to their own agency
-        inviteAgencyId = currentUser.agencyId ?? undefined;
-      } else {
-        // Owners can specify any agency
-        inviteAgencyId = agencyId;
-      }
-      
-      // Validate that agency_admin, agency_employee, and agency_client roles require an agencyId
-      if ((role === "agency_admin" || role === "agency_employee" || role === "agency_client") && !inviteAgencyId) {
-        return res.status(400).json({ error: "Agency ID is required for agency_admin, agency_employee, and agency_client roles" });
-      }
-      if (clientAccess != null) {
-        if (!Array.isArray(clientAccess) || clientAccess.some(id => !Number.isSafeInteger(id) || id <= 0)) {
-          return res.status(400).json({ error: "Invalid client access list" });
-        }
-        for (const id of clientAccess) {
-          const assignedClient = await storage.getClient(id);
-          if (!assignedClient || (inviteAgencyId && assignedClient.agencyId !== inviteAgencyId)) {
-            return res.status(400).json({ error: "Client access must belong to the invited agency" });
-          }
-        }
-      }
-      
-      const token = crypto.randomUUID();
-      const invite = await storage.createInvite({
-        token,
-        email: email || null,
-        role,
-        agencyId: inviteAgencyId,
-        clientAccess: clientAccess || null,
-        createdById: userId,
-        expiresAt: expiresAt ? new Date(expiresAt) : null,
-        usedAt: null,
-        usedById: null,
-      });
-      
-      res.status(201).json(invite);
-    } catch (error: any) {
-      console.error("Error creating invite:", error);
-      res.status(400).json({ error: error.message || "Failed to create invite" });
-    }
-  });
+  const USER_ROLES = ["owner", "agency_admin", "agency_employee", "agency_client"] as const;
+  const loginEmailSchema = z.string().trim().toLowerCase().email("Enter a valid email address.").max(320);
 
-  app.get("/api/invites", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const currentUser = await storage.getUser(userId);
-      if (!currentUser || (currentUser.role !== "owner" && currentUser.role !== "agency_admin")) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      
-      let invites: Invite[] = [];
-      if (currentUser.role === "owner") {
-        invites = await storage.getAllInvites();
-      } else if (currentUser.agencyId) {
-        invites = await storage.getInvitesByAgency(currentUser.agencyId);
-      }
-      
-      res.json(invites);
-    } catch (error) {
-      console.error("Error fetching invites:", error);
-      res.status(500).json({ error: "Failed to fetch invites" });
+  // Validates a new login; returns the normalized email or an error with its HTTP status.
+  async function checkNewLogin(email: unknown, password: unknown): Promise<{ error: string; status: number } | { email: string }> {
+    const parsedEmail = loginEmailSchema.safeParse(email);
+    if (!parsedEmail.success) return { error: parsedEmail.error.issues[0].message, status: 400 };
+    const problem = passwordProblem(password);
+    if (problem) return { error: problem, status: 400 };
+    if (await storage.getUserByEmail(parsedEmail.data)) {
+      return { error: "That email already has a login.", status: 409 };
     }
-  });
+    return { email: parsedEmail.data };
+  }
 
-  app.get("/api/invites/validate/:token", async (req, res) => {
-    try {
-      const { token } = req.params;
-      const invite = await storage.getInviteByToken(token);
-      
-      if (!invite) {
-        return res.status(404).json({ valid: false, error: "Invite not found" });
-      }
-      
-      if (invite.usedAt) {
-        return res.status(400).json({ valid: false, error: "Invite already used" });
-      }
-      
-      if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) {
-        return res.status(400).json({ valid: false, error: "Invite expired" });
-      }
-      
-      res.json({ valid: true, invite: { role: invite.role, agencyId: invite.agencyId, email: invite.email } });
-    } catch (error) {
-      console.error("Error validating invite:", error);
-      res.status(500).json({ valid: false, error: "Failed to validate invite" });
-    }
-  });
-
-  // Resend an existing invitation without creating another client or token.
-  app.post("/api/invites/:id/send", isAuthenticated, async (req: any, res) => {
+  // Staff and client users (owner only)
+  app.post("/api/users", isAuthenticated, async (req: any, res) => {
     try {
       const currentUser = await getRequestUser(req);
-      if (!isAdminUser(currentUser)) return forbidden(res);
-      const inviteId = Number(req.params.id);
-      if (!Number.isSafeInteger(inviteId) || inviteId <= 0) {
-        return res.status(400).json({ error: "Invalid invite ID" });
+      if (currentUser?.role !== "owner") return forbidden(res);
+      const { email, password, role, agencyId, clientAccess, firstName, lastName } = req.body ?? {};
+      if (!USER_ROLES.includes(role)) return res.status(400).json({ error: "Choose a valid role." });
+      if (role !== "owner" && (!Number.isSafeInteger(agencyId) || !await storage.getAgency(agencyId))) {
+        return res.status(400).json({ error: "Choose an agency for this user." });
       }
-      const [invite] = await db.select().from(invites).where(eq(invites.id, inviteId)).limit(1);
-      if (!invite) return res.status(404).json({ error: "Invite not found" });
-      if (currentUser!.role !== "owner" && invite.agencyId !== currentUser!.agencyId) return forbidden(res);
-      if (!invite.email || invite.usedAt || (invite.expiresAt && invite.expiresAt < new Date())) {
-        return res.status(400).json({ error: "This invitation is used, expired, or has no email address." });
+      const access: number[] = clientAccess ?? [];
+      if (!Array.isArray(access) || access.some(id => !Number.isSafeInteger(id) || id <= 0)) {
+        return res.status(400).json({ error: "Invalid client access list" });
       }
-      if (invite.role !== "agency_client" || !invite.agencyId || invite.clientAccess?.length !== 1) {
-        return res.status(400).json({ error: "Only client workspace invitations can be emailed here." });
+      if (role === "agency_client" && access.length !== 1) {
+        return res.status(400).json({ error: "A client user needs exactly one workspace." });
       }
-      const client = await storage.getClient(invite.clientAccess[0]);
-      if (!client || client.agencyId !== invite.agencyId) {
-        return res.status(400).json({ error: "The assigned client workspace is unavailable." });
+      for (const id of access) {
+        const assignedClient = await storage.getClient(id);
+        if (!assignedClient || assignedClient.agencyId !== agencyId) {
+          return res.status(400).json({ error: "Workspaces must belong to the chosen agency." });
+        }
       }
-      const agency = await storage.getAgency(invite.agencyId);
-      const result = await sendInviteEmail({
-        to: invite.email,
-        inviteToken: invite.token,
-        agencyName: agency?.name || "EventHQ",
-        clientName: client.name,
-        baseUrl: getInviteBaseUrl(),
-      });
-      if (!result.success) return res.status(502).json({ error: result.error });
-      res.json({ sent: true });
-    } catch (error: any) {
-      console.error("Error sending existing invite:", error.message);
-      res.status(500).json({ error: "Failed to send invitation email" });
+      const checked = await checkNewLogin(email, password);
+      if ("error" in checked) return res.status(checked.status).json({ error: checked.error });
+      const user = await storage.createUserWithPassword({
+        email: checked.email,
+        firstName: typeof firstName === "string" && firstName.trim() ? firstName.trim() : null,
+        lastName: typeof lastName === "string" && lastName.trim() ? lastName.trim() : null,
+        role,
+        agencyId: role === "owner" ? null : agencyId,
+        clientAccess: role === "owner" ? null : access,
+      }, password);
+      res.status(201).json(user);
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ error: "Failed to create user" });
     }
   });
 
-  app.delete("/api/invites/:id", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/users/:id/password", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const currentUser = await storage.getUser(userId);
-      if (!currentUser || (currentUser.role !== "owner" && currentUser.role !== "agency_admin")) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
+      const currentUser = await getRequestUser(req);
+      if (currentUser?.role !== "owner") return forbidden(res);
+      const problem = passwordProblem(req.body?.password);
+      if (problem) return res.status(400).json({ error: problem });
+      if (!await storage.getUser(req.params.id)) return res.status(404).json({ error: "User not found" });
+      await storage.setUserPassword(req.params.id, req.body.password);
+      res.json({ updated: true });
+    } catch (error) {
+      console.error("Error resetting password:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
 
-      const inviteId = Number(req.params.id);
-      if (!Number.isSafeInteger(inviteId) || inviteId <= 0) {
-        return res.status(400).json({ error: "Invalid invite ID" });
+  app.delete("/api/users/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUser = await getRequestUser(req);
+      if (currentUser?.role !== "owner") return forbidden(res);
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ error: "User not found" });
+      if (target.id === currentUser.id) {
+        return res.status(400).json({ error: "You can't remove your own account." });
       }
-      const [invite] = await db.select().from(invites).where(eq(invites.id, inviteId)).limit(1);
-      if (!invite) return res.status(404).json({ error: "Invite not found" });
-      if (currentUser.role !== "owner" && (!currentUser.agencyId || invite.agencyId !== currentUser.agencyId)) {
-        return forbidden(res);
+      if (target.role === "owner" && (await storage.getAllUsers()).filter(u => u.role === "owner").length <= 1) {
+        return res.status(400).json({ error: "You can't remove the last owner." });
       }
-      const deleted = await storage.deleteInvite(inviteId);
-      if (!deleted) {
-        return res.status(404).json({ error: "Invite not found" });
-      }
+      await storage.deleteUser(target.id);
       res.status(204).send();
-    } catch (error: any) {
-      console.error("Error deleting invite:", error);
-      res.status(500).json({ error: error.message || "Failed to delete invite" });
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: "Failed to remove user" });
+    }
+  });
+
+  // CLIENT LOGINS: email + password accounts that can open exactly one client workspace
+  async function manageableClientId(req: any, res: Response): Promise<number | undefined> {
+    const user = await getRequestUser(req);
+    const clientId = Number(req.params.id);
+    if (!Number.isSafeInteger(clientId) || clientId <= 0) {
+      res.status(400).json({ error: "Invalid client ID" });
+      return undefined;
+    }
+    if (!isAdminUser(user) || !await canAccessClient(user, clientId)) {
+      forbidden(res);
+      return undefined;
+    }
+    if (!await storage.getClient(clientId)) {
+      res.status(404).json({ error: "Client not found" });
+      return undefined;
+    }
+    return clientId;
+  }
+
+  async function findClientLogin(clientId: number, userId: string): Promise<User | undefined> {
+    const user = await storage.getUser(userId);
+    return user?.role === "agency_client" && user.clientAccess?.includes(clientId) ? user : undefined;
+  }
+
+  const clientLoginView = (user: User) => ({
+    id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, createdAt: user.createdAt,
+  });
+
+  app.get("/api/clients/:id/users", isAuthenticated, async (req: any, res) => {
+    try {
+      const clientId = await manageableClientId(req, res);
+      if (clientId === undefined) return;
+      res.json((await storage.getClientUsers(clientId)).map(clientLoginView));
+    } catch (error) {
+      console.error("Error fetching client logins:", error);
+      res.status(500).json({ error: "Failed to fetch client logins" });
+    }
+  });
+
+  app.post("/api/clients/:id/users", isAuthenticated, async (req: any, res) => {
+    try {
+      const clientId = await manageableClientId(req, res);
+      if (clientId === undefined) return;
+      const client = (await storage.getClient(clientId))!;
+      const checked = await checkNewLogin(req.body?.email, req.body?.password);
+      if ("error" in checked) return res.status(checked.status).json({ error: checked.error });
+      const user = await storage.createUserWithPassword({
+        email: checked.email,
+        role: "agency_client",
+        agencyId: client.agencyId,
+        clientAccess: [clientId],
+      }, req.body.password);
+      res.status(201).json(clientLoginView(user));
+    } catch (error) {
+      console.error("Error creating client login:", error);
+      res.status(500).json({ error: "Failed to create client login" });
+    }
+  });
+
+  app.patch("/api/clients/:id/users/:userId/password", isAuthenticated, async (req: any, res) => {
+    try {
+      const clientId = await manageableClientId(req, res);
+      if (clientId === undefined) return;
+      if (!await findClientLogin(clientId, req.params.userId)) {
+        return res.status(404).json({ error: "Login not found for this workspace" });
+      }
+      const problem = passwordProblem(req.body?.password);
+      if (problem) return res.status(400).json({ error: problem });
+      await storage.setUserPassword(req.params.userId, req.body.password);
+      res.json({ updated: true });
+    } catch (error) {
+      console.error("Error resetting client password:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
+  app.delete("/api/clients/:id/users/:userId", isAuthenticated, async (req: any, res) => {
+    try {
+      const clientId = await manageableClientId(req, res);
+      if (clientId === undefined) return;
+      if (!await findClientLogin(clientId, req.params.userId)) {
+        return res.status(404).json({ error: "Login not found for this workspace" });
+      }
+      await storage.deleteUser(req.params.userId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error removing client login:", error);
+      res.status(500).json({ error: "Failed to remove login" });
     }
   });
 
@@ -697,62 +693,20 @@ export function registerApiRoutes(app: Express): void {
         : user.agencyId;
       if (!agencyId) return forbidden(res);
       
-      const { sendInvite, ...clientData } = req.body;
+      const { login, ...clientData } = req.body ?? {};
       const validatedData = insertClientSchema.parse({ ...clientData, agencyId });
-      const client = await storage.createClient(validatedData);
-      
-      let inviteSent = false;
-      let inviteError: string | undefined;
-      
-      // If sendInvite is true and client has an email, create and send invite
-      if (sendInvite && client.email) {
-        try {
-          const token = randomUUID();
-          const userId = req.user.claims.sub;
-          
-          // Create the invite
-          await storage.createInvite({
-            token,
-            email: client.email,
-            role: "agency_client",
-            agencyId,
-            clientAccess: [client.id],
-            createdById: userId,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-            usedAt: null,
-            usedById: null,
-          });
-          
-          // Get agency name for the email
-          const agency = await storage.getAgency(agencyId);
-          const agencyName = agency?.name || "EventHQ";
-          
-          // Send invite email
-          const emailResult = await sendInviteEmail({
-            to: client.email,
-            inviteToken: token,
-            agencyName,
-            clientName: client.name,
-            baseUrl: getInviteBaseUrl(),
-          });
-          
-          if (emailResult.success) {
-            inviteSent = true;
-          } else {
-            inviteError = emailResult.error;
-          }
-        } catch (invErr: any) {
-          console.error("Error creating/sending invite:", invErr);
-          inviteError = invErr.message;
-        }
+      if (login == null) {
+        const client = await storage.createClient(validatedData);
+        return res.status(201).json(publicClient(client));
       }
-      
-      res.status(201).json({
-        ...publicClient(client),
-        sendInvite: !!sendInvite,
-        inviteSent, 
-        inviteError 
+      // Workspace and its client login are saved together, so a bad login never leaves a half-made workspace.
+      const checked = await checkNewLogin(login.email, login.password);
+      if ("error" in checked) return res.status(checked.status).json({ error: checked.error });
+      const { client, user: loginUser } = await storage.createClientWithLogin(validatedData, {
+        email: checked.email,
+        password: login.password,
       });
+      res.status(201).json({ ...publicClient(client), login: { id: loginUser.id, email: loginUser.email } });
     } catch (error: any) {
       console.error("Error creating client:", error);
       res.status(400).json({ error: error.message || "Failed to create client" });
@@ -838,6 +792,8 @@ export function registerApiRoutes(app: Express): void {
       if (!client) {
         return res.status(404).json({ error: "Client not found" });
       }
+      // A deactivated workspace signs its client logins out right away.
+      if (!isActive) await storage.endClientSessions(clientId);
       res.json(publicClient(client));
     } catch (error: any) {
       console.error("Error updating client active status:", error);
@@ -1614,11 +1570,12 @@ export function registerApiRoutes(app: Express): void {
     }
   });
 
+  // Goals are set by the same people who manage Event Tracker actuals (owner and agency admins).
   app.post("/api/clients/:clientId/webinar-goals", isAuthenticated, async (req: any, res) => {
     try {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId);
-      if (!isAgencyStaff(user) || !await canAccessClient(user, clientId)) {
+      if (!isAdminUser(user) || !await canAccessClient(user, clientId)) {
         return forbidden(res);
       }
       const goals = await storage.createWebinarGoals({
@@ -1645,7 +1602,7 @@ export function registerApiRoutes(app: Express): void {
     try {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId);
-      if (!isAgencyStaff(user) || !await canAccessClient(user, clientId)) {
+      if (!isAdminUser(user) || !await canAccessClient(user, clientId)) {
         return forbidden(res);
       }
       
@@ -1723,6 +1680,9 @@ export function registerApiRoutes(app: Express): void {
       if ((parsed.totalAttendees ?? 0) > (parsed.totalRegistrants ?? 0)) {
         return res.status(400).json({ error: "Attendance cannot exceed registrations" });
       }
+      if ((parsed.peopleAtPitch ?? 0) > (parsed.totalAttendees ?? 0)) {
+        return res.status(400).json({ error: "People at pitch cannot exceed attendees" });
+      }
       // Create the event performance record
       const event = await storage.createEventPerformance({
         clientId,
@@ -1771,6 +1731,9 @@ export function registerApiRoutes(app: Express): void {
       const merged = { ...existingEvent, ...parsed };
       if ((merged.totalAttendees ?? 0) > (merged.totalRegistrants ?? 0)) {
         return res.status(400).json({ error: "Attendance cannot exceed registrations" });
+      }
+      if ((merged.peopleAtPitch ?? 0) > (merged.totalAttendees ?? 0)) {
+        return res.status(400).json({ error: "People at pitch cannot exceed attendees" });
       }
       // Update the event
       const updateData: any = {
@@ -2753,7 +2716,7 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
 
       res.json({ userMessage: userMsg, assistantMessage: assistantMsg });
     } catch (error: any) {
-      console.error("Tuck AI error:", error);
+      console.error("Neo AI error:", error);
       res.status(500).json({ error: error.message || "Failed to get AI response" });
     }
   });

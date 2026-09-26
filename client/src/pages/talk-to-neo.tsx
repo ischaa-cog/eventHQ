@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-interface TuckChat {
+interface NeoChat {
   id: number;
   clientId: number;
   title: string;
@@ -31,7 +31,7 @@ interface TuckChat {
   updatedAt: string;
 }
 
-interface TuckMessage {
+interface NeoMessage {
   id: number;
   chatId: number;
   role: "user" | "assistant";
@@ -55,7 +55,7 @@ function ChatList({
   onCreate,
   isCreating,
 }: {
-  chats: TuckChat[];
+  chats: NeoChat[];
   activeChatId: number | null;
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
@@ -123,7 +123,7 @@ function ChatList({
   );
 }
 
-export default function TalkToTuckPage() {
+export default function TalkToNeoPage() {
   const { id: clientId } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -139,7 +139,7 @@ export default function TalkToTuckPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  const { data: chats = [] } = useQuery<TuckChat[]>({
+  const { data: chats = [] } = useQuery<NeoChat[]>({
     queryKey: [`/api/clients/${clientId}/tuck/chats`],
     queryFn: async () => {
       const res = await fetch(`/api/clients/${clientId}/tuck/chats`);
@@ -149,7 +149,7 @@ export default function TalkToTuckPage() {
     enabled: !!clientId,
   });
 
-  const { data: messages = [] } = useQuery<TuckMessage[]>({
+  const { data: messages = [] } = useQuery<NeoMessage[]>({
     queryKey: [`/api/clients/${clientId}/tuck/chats/${activeChatId}/messages`],
     queryFn: async () => {
       const res = await fetch(
@@ -179,7 +179,7 @@ export default function TalkToTuckPage() {
         body: JSON.stringify({ title: "New Chat" }),
       });
       if (!res.ok) throw new Error("Failed to create chat");
-      return res.json() as Promise<TuckChat>;
+      return res.json() as Promise<NeoChat>;
     },
     onSuccess: (chat) => {
       queryClient.invalidateQueries({
