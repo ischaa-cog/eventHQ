@@ -75,6 +75,8 @@ const { Pool } = pg;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  // Each Vercel function instance gets its own pool; keep them small so many instances fit the Supabase pooler.
+  ...(process.env.VERCEL ? { max: 3 } : {}),
 });
 
 export const db = drizzle(pool);

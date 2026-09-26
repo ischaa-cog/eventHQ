@@ -1,65 +1,11 @@
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
-import { createServer } from "http";
 import { seedTrainingCatalog } from "./training-catalog";
+import { createApp, log } from "./app";
 
-const app = express();
-const httpServer = createServer(app);
-
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
-}
-
-app.use(
-  express.json({
-    limit: '10mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
-
-app.use(express.urlencoded({ extended: false, limit: '10mb' }));
-
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
-
-app.use((req, res, next) => {
-  const start = Date.now();
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (req.path.startsWith("/api")) {
-      // Route templates and status are safe to log; actual paths and bodies can contain tokens.
-      log(`${req.method} ${req.route?.path ?? "/api/[unmatched]"} ${res.statusCode} in ${duration}ms`);
-    }
-  });
-
-  next();
-});
-
+// Long-running server for local development and non-serverless hosting. Vercel uses server/vercel.ts instead.
 (async () => {
   await seedTrainingCatalog();
-  await registerRoutes(httpServer, app);
-
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
-  });
+  const { app, httpServer } = await createApp();
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

@@ -15,3 +15,4 @@ zipFile.zip
 .upm/
 # Feedback recordings (large, not code)
 loom/
+.vercel
