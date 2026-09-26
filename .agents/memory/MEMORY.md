@@ -10,3 +10,4 @@
 - [Portal login boundary](portal-login-boundary.md) — login entry pages do not change roles; mismatched accounts get guidance, not another portal’s permissions.
 - [Invitation sender verification](invitation-sender-verification.md) — an authorized email connection does not prove domain ownership; keep real delivery gated on DNS verification.
 - [Supabase data-copy boundary](supabase-data-copy-boundary.md) — copied data is not a runtime cutover; protect imported public tables and avoid transferring active sessions.
+- [GitHub publication history](github-publication-history.md) — public GitHub copy is a clean snapshot, not the local Git lineage; do not force-push old history.
