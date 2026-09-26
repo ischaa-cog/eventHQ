@@ -1,0 +1,12 @@
+- [Client onboarding ownership](client-onboarding.md) — onboarding is first-party; answers belong in the client profile and completion shows a reviewable setup summary.
+- [Production data transfers](production-data-transfers.md) — preserve existing production sign-in data when moving development business records; inspect before any overwrite.
+- [Mockup React resolution](mockup-react-resolution.md) — sandbox previews can load two React copies from different workspace roots; keep renderer and components on one copy.
+- [EventHQ brand contrast](eventhq-brand-contrast.md) — pair the event/play mark with a light or dark wordmark by surface; keep the favicon simpler for tab-size clarity.
+- [Postgres type skew](postgres-type-skew.md) — mixed lockfile installs can give Drizzle and the app incompatible pg Pool declarations even when runtime DB access works.
+- [Masterclass terminology](masterclass-terminology.md) — webinar and masterclass are one concept; show Masterclass while retaining legacy webinar values for compatibility.
+- [Masterclass reporting boundary](masterclass-reporting-boundary.md) — show legacy records separately inside Event Tracker until duplicates can be reconciled safely.
+- [Demo client access](demo-client-access.md) — demo email/password sign-in is development-only, read-only, and isolated from real client tenants.
+- [Workspace navigation](workspace-navigation.md) — staff switch through Client Workspaces in the flat menu; clients have no picker.
+- [Portal login boundary](portal-login-boundary.md) — login entry pages do not change roles; mismatched accounts get guidance, not another portal’s permissions.
+- [Invitation sender verification](invitation-sender-verification.md) — an authorized email connection does not prove domain ownership; keep real delivery gated on DNS verification.
+- [Supabase data-copy boundary](supabase-data-copy-boundary.md) — copied data is not a runtime cutover; protect imported public tables and avoid transferring active sessions.

@@ -1,0 +1,33 @@
+Update the existing client portal’s navigation and client permissions. Inspect the current routes, roles, and menu configuration before making changes. Preserve existing client data and working features.
+
+## Client menu
+
+Remove the current subfolders and show these items as one flat menu, in this order:
+
+1. Dashboard
+2. Talk to Neo AI
+3. Marketing Calendar
+4. Live Sales Feed
+5. Event Tracker
+6. Projections
+7. Training Lab
+8. Notifications
+
+Place **Talk to Neo AI** prominently near the top and give it a distinct visual treatment so it stands out from the other menu items. Rename all client-facing references to **Tuck AI** and **Talk to Tuck** to **Neo AI** and **Talk to Neo AI**, respectively. Check page titles, buttons, and navigation labels as well as the sidebar.
+
+Keep Notifications in the menu for now. We may move it into Settings later.
+
+## Remove from the client experience
+
+- **Client Workspaces:** Clients have only one workspace. Hide the workspace selector or menu item for client accounts, and take them directly to their own workspace.
+- **Event Builder:** Hide this feature for now. It was intended as a possible project manager tool and is not part of the client portal.
+- **Master Class Tracker:** Remove its separate menu item and page entry point. Master class performance belongs in **Event Tracker**, which already includes those statistics. Preserve its underlying data.
+- **Your Setup, Assets, and Client Profile:** Remove these from client navigation. Clients should not be able to upload, edit, or delete setup assets or profile information. Keep any necessary management screens available only to authorized internal team members.
+
+Update route permissions as well as menu visibility: a client should not be able to open a hidden or team-only page by entering its URL directly. Do not delete stored assets, profiles, events, or historical metrics as part of this navigation cleanup.
+
+## Verify
+
+Sign in as a client and confirm the menu has exactly the eight items listed above, in that order, with no subfolders. Check that Talk to Neo AI opens correctly, master class data remains available in Event Tracker, and team-only pages cannot be accessed by the client. Then sign in as an internal team member and confirm the management functions they need are still accessible.
+
+Report the changes made and flag any existing screen whose purpose or permission level is unclear before removing its data.

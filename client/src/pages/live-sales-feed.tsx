@@ -1,0 +1,54 @@
+import { AppLayout } from "@/components/layout/AppLayout";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Calendar, DollarSign, Search, ChevronLeft, ChevronRight, Upload } from "lucide-react";
+import { useParams } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/hooks/useAuth";
+
+interface Sale { id: number; amount: string; currency?: string; saleDate: string; productName: string | null; customerName: string | null; source?: string | null; status?: string | null; reference?: string | null; eventPerformanceId?: number | null; }
+interface PaginatedSalesResponse { sales: Sale[]; total: number; page: number; totalPages: number; }
+interface SourceHealth { processor: string; configured: boolean; verified: boolean; lastSync?: string | null; error?: string | null; }
+
+export default function LiveSalesFeed() {
+  const params = useParams(); const clientId = params.id || "1"; const { user } = useAuth(); const queryClient = useQueryClient();
+  const [page, setPage] = useState(1); const [search, setSearch] = useState(""); const [processor, setProcessor] = useState("");
+  const [start, setStart] = useState<Date>(); const [end, setEnd] = useState<Date>(); const [importText, setImportText] = useState("");
+  const limit = 10;
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (search) query.set("search", search); if (processor) query.set("processor", processor);
+  if (start) query.set("startDate", start.toISOString()); if (end) query.set("endDate", new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999).toISOString());
+  const salesQuery = useQuery<PaginatedSalesResponse>({ queryKey: [`/api/clients/${clientId}/sales/paginated`, page, search, processor, start, end], queryFn: async () => { const r = await fetch(`/api/clients/${clientId}/sales/paginated?${query}`); if (!r.ok) throw new Error("Unable to load sales"); return r.json(); } });
+  const sourceQuery = useQuery<SourceHealth[]>({ queryKey: [`/api/clients/${clientId}/sales/sources`], queryFn: async () => { const r = await fetch(`/api/clients/${clientId}/sales/sources`); if (!r.ok) throw new Error("Unable to load source health"); return r.json(); } });
+  const canImport = user?.role === "owner" || user?.role === "agency_admin";
+  const importMutation = useMutation({ mutationFn: async (transactions: unknown[]) => { const r = await fetch(`/api/clients/${clientId}/sales/import`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transactions }) }); if (!r.ok) throw new Error((await r.text()) || "Import failed"); return r.json(); }, onSuccess: () => { setImportText(""); queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/sales/paginated`] }); } });
+  const parseImport = () => {
+    try {
+      let value: unknown = JSON.parse(importText);
+      if (typeof value === "object" && value && !Array.isArray(value)) value = (value as { transactions?: unknown }).transactions;
+      if (!Array.isArray(value) || !value.length) throw new Error("Provide a JSON array of transactions");
+      const required = ["saleDate", "amount", "status", "source"];
+      if (value.some(v => !v || typeof v !== "object" || required.some(k => !(k in v)) || !("externalId" in v || "dedupeKey" in v))) throw new Error("Each transaction needs saleDate, amount, status, source, and an externalId or dedupeKey");
+      importMutation.mutate(value);
+    } catch (e) { window.alert(e instanceof Error ? e.message : "Invalid import data"); }
+  };
+  const money = (n: number, currency = "USD") => new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 2 }).format(n);
+  const statusClass = (status?: string | null): "destructive" | "outline" | "secondary" => status?.toLowerCase().includes("refund") || status?.toLowerCase().includes("fail") ? "destructive" : status?.toLowerCase() === "pending" ? "outline" : "secondary";
+  return <AppLayout mode="client"><div className="space-y-6">
+    <div><h1 className="text-3xl font-bold tracking-tight">Live Sales Feed</h1><p className="text-muted-foreground">Reconciled sales from your connected processors</p></div>
+    <Card><CardHeader><CardTitle>Source health</CardTitle><CardDescription>Connection status and latest synchronization for each processor</CardDescription></CardHeader><CardContent>
+      {sourceQuery.isLoading ? <p className="text-sm text-muted-foreground">Checking sources…</p> : sourceQuery.isError ? <p className="text-sm text-destructive">Could not load source health.</p> : !sourceQuery.data?.length ? <p className="text-sm text-muted-foreground">No processors configured.</p> : <div className="flex flex-wrap gap-3">{sourceQuery.data.map(s => <div key={s.processor} className="rounded-md border px-3 py-2 text-sm"><div className="flex items-center gap-2 font-medium">{s.processor}<Badge variant={s.configured && s.verified ? "secondary" : "outline"}>{!s.configured ? "Not configured" : s.verified ? "Verified" : "Needs verification"}</Badge></div><p className="text-xs text-muted-foreground">{s.error || (s.lastSync ? `Last sync ${format(new Date(s.lastSync), "MMM d, yyyy h:mm a")}` : "Not synced yet")}</p></div>)}</div>}
+    </CardContent></Card>
+    {canImport && <Card><CardHeader><CardTitle className="flex items-center gap-2"><Upload className="h-4 w-4" />Admin import</CardTitle><CardDescription>Paste a JSON array (or an object with a transactions array). Each USD row needs saleDate, amount, status, source, and a stable externalId or dedupeKey for safe re-imports.</CardDescription></CardHeader><CardContent className="space-y-2"><textarea className="w-full min-h-20 rounded-md border bg-background p-2 text-sm" value={importText} onChange={e => setImportText(e.target.value)} placeholder='[{"saleDate":"2025-01-01T12:00:00Z","amount":100,"status":"completed","source":"stripe","externalId":"txn_123"}]' /><Button onClick={parseImport} disabled={!importText || importMutation.isPending}>{importMutation.isPending ? "Importing…" : "Validate and import"}</Button>{importMutation.isSuccess && <p className="text-sm text-green-600">Import complete.</p>}{importMutation.isError && <p className="text-sm text-destructive">{(importMutation.error as Error).message}</p>}</CardContent></Card>}
+    <Card data-testid="live-sales-feed"><CardHeader><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5 text-green-600" />Sales history</CardTitle><CardDescription>Search by customer, product, reference, or processor</CardDescription></div><div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /><Input placeholder="Search sales…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} className="pl-8 w-52" /></div><select className="h-9 rounded-md border bg-background px-2 text-sm" value={processor} onChange={e => { setProcessor(e.target.value); setPage(1); }}><option value="">All processors</option>{sourceQuery.data?.map(s => <option key={s.processor} value={s.processor}>{s.processor}</option>)}</select><Popover><PopoverTrigger asChild><Button variant="outline" size="sm"><Calendar className="mr-1 h-4 w-4" />{start ? format(start, "MMM d") : "From"}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><CalendarComponent mode="single" selected={start} onSelect={d => { setStart(d); setPage(1); }} /></PopoverContent></Popover><Popover><PopoverTrigger asChild><Button variant="outline" size="sm"><Calendar className="mr-1 h-4 w-4" />{end ? format(end, "MMM d") : "To"}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><CalendarComponent mode="single" selected={end} onSelect={d => { setEnd(d); setPage(1); }} /></PopoverContent></Popover></div></div></CardHeader><CardContent>
+      {salesQuery.isLoading ? <p className="py-8 text-center text-muted-foreground">Loading sales…</p> : salesQuery.isError ? <p className="py-8 text-center text-destructive">Could not load sales. Please try again.</p> : !salesQuery.data?.sales.length ? <p className="py-8 text-center text-muted-foreground">{search || processor || start || end ? "No sales match these filters." : "No sales recorded yet."}</p> : <><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Customer / product</TableHead><TableHead>Processor</TableHead><TableHead>Status</TableHead><TableHead>Reference / attribution</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader><TableBody>{salesQuery.data.sales.map(s => <TableRow key={s.id}><TableCell className="whitespace-nowrap">{format(new Date(s.saleDate), "MMM d, yyyy")}</TableCell><TableCell><div className="font-medium">{s.customerName || "—"}</div><div className="text-xs text-muted-foreground">{s.productName || "—"}</div></TableCell><TableCell>{s.source || "—"}</TableCell><TableCell><Badge variant={statusClass(s.status)}>{s.status || "Unknown"}</Badge></TableCell><TableCell><div>{s.reference || "—"}</div>{s.eventPerformanceId && <div className="text-xs text-muted-foreground">Performance #{s.eventPerformanceId}</div>}</TableCell><TableCell className={`text-right font-medium ${statusClass(s.status) === "destructive" ? "text-destructive" : ""}`}>{money(Number(s.amount), s.currency || "USD")}</TableCell></TableRow>)}</TableBody></Table></div><div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground"><span>Showing {((salesQuery.data.page - 1) * limit) + 1}–{Math.min(salesQuery.data.page * limit, salesQuery.data.total)} of {salesQuery.data.total}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft className="h-4 w-4" /></Button><span className="px-2 py-1">{page} / {salesQuery.data.totalPages || 1}</span><Button variant="outline" size="sm" disabled={page >= salesQuery.data.totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight className="h-4 w-4" /></Button></div></div></>}
+    </CardContent></Card>
+  </div></AppLayout>;
+}

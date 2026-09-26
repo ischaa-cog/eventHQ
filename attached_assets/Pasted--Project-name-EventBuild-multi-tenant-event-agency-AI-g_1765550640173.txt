@@ -1,0 +1,65 @@
+
+Project name: EventBuild (multi-tenant event agency AI generator)
+Prompt to Replit:
+Build a multi-tenant web app called “EventBuildOS” for an event marketing agency. The app must reduce event build-out time by generating marketing assets (emails, SMS, social posts, scripts, slide outlines, agreements, tracked link plans, and marketing plans) from a single intake form, and route outputs to the right team members.
+ Tech requirements
+* Use Next.js (App Router) + TypeScript
+* Use Postgres + Prisma ORM
+* Use Clerk authentication with Organizations enabled (multi-tenant): Agency = Organization
+* RBAC roles: Admin, PM, Copy, Design, Funnel, Finance, Viewer
+* Use OpenAI API for generation (structured outputs)
+* Use a job runner/queue (pg-boss preferred) so “Generate All” runs async and updates progress
+* Integrations:
+    * Slack notifications (incoming webhook is fine for MVP)
+    * Google Drive API: create folder structure per client/event and upload/save generated assets
+* Provide a clean UI with: Dashboard, Clients, Client Workspace, Event Builder, Assets Library, Projection Reports, Admin (Templates/Style Guide)
+ Core features (MVP)
+ Multi-tenant structure
+* Agencies (Clerk orgs) each have clients and users
+* Users only see data for their agency
+ Client workspace
+* Store client profile fields: name, niche, offer types, brand voice rules, banned phrases (e.g., no em dashes), CTA style, disclaimers
+* Upload vault: past emails/SMS/posts (store file metadata + optional text extraction if simple)
+* Store a “Style Guide” text block and “Example Assets” text blocks
+ Event Builder intake form  Collect structured inputs:
+* Event name, event type (webinar/summit/challenge), dates, timezone
+* Offer ladder (free/VIP/upsells), pricing, bonuses
+* Audience persona, pains/doubts, desired outcomes
+* Speaker info (optional)
+* Link tracking conventions (utm_source, utm_medium, utm_campaign)
+* Required asset toggles (checkboxes)
+ Generate assets
+* A “Generate All Assets” button triggers a background job
+* Generate and store assets as rows in an Assets table with fields:
+    * asset_type (email_sequence, sms_sequence, social_posts, marketing_plan, scripts, slide_outline, agreement, tracked_links, sales_page_copy)
+    * title
+    * content (markdown)
+    * status (draft, in_review, approved)
+    * version
+    * owner_role (PM/Copy/etc)
+* Show generation progress (0–100%) and timestamps
+ Slack notify When generation completes for an event, post a message to a configured Slack webhook:
+* Include event name, client name, and links to the Assets page and Drive folder
+ Google Drive storage
+* On event creation, create a folder structure: /Client Name/Event Name/01 Briefs /02 Copy /03 Slides /04 Agreements /05 Tracking /06 Reports
+* Save each generated asset into Google Drive (Google Doc if possible; fallback: .md file)
+* Store drive_folder_id and doc URLs on the Asset records
+ Projection Reports  Create a Projection Report builder for challenges, webinars and summits:  Inputs for events: revenue goal, ticket prices, take rates, show-up rate, close rate, CPL, ad budget Outputs: required registrants, leads, break-even CPL, scenario table (conservative/target/aggressive) Export: generate a branded PDF with agency logo upload and client logo upload Store PDF in Drive and link in the app  AI generation requirements
+* Use the Client Style Guide + Example Assets + intake form as system/context
+* Outputs must be practical and formatted cleanly
+* Enforce banned formatting (e.g., remove em dashes)
+* Use consistent headings and sections
+* Return structured JSON from the model for each asset type, then render into markdown for storage  Admin section
+* Manage prompt templates per asset type
+* Manage default style rules (my agency-wide preferences)
+* Manage Slack webhook per agency
+* Manage Google Drive credentials per agency (store encrypted environment variables; for MVP assume single agency credentials)
+ Deliverables
+* Working app with seed data and clear README
+* Prisma schema and migrations
+* Minimal but usable UI
+* A “demo mode” seed agency + client + event to test generation quickly
+Notes
+* Prioritize reliability and speed over perfect UI.
+* Make sure generation jobs cannot crash the server; retry failed jobs and log errors.
+* Include an audit log of who triggered generation and when.

@@ -1,0 +1,58 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "9yeFTocxHFl9-7BAx_XAC"
+uri = "file://attached_assets/generated_videos/eventhq-project-overview.mp4"
+type = "video"
+title = "EventHQ Animated Overview"
+description = "An 8-second 16:9, 720p animated overview of the EventHQ dashboard, client workspaces, events, and projections."
+logical_id = "12e629c3-19b3-4a13-9c9b-b612e5f8270b"
+content_hash = "sha256:353e3a083e92fa439297a717b211df36db266df82f84866dbc5da6c779bae897"
+size = 307685
+mtime_ms = 1790243156084
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:e7ae6910-eb6f-41ae-b000-68191a6c03fe/12e629c3-19b3-4a13-9c9b-b612e5f8270b/0b0217b5-60c9-4878-92f0-91079a1ef021"
+storage_version_token = "1790243175732392"
+content_type = "video/mp4"
+
+[[outputs]]
+id = "Jm6rgUL0pY-OpCf3tN0g8"
+uri = "file://client/public/logo.png"
+type = "image"
+title = "EventHQ logo"
+description = "Transparent logo for dark surfaces."
+logical_id = "6e36882d-ad0d-4e56-bf1b-dcbcd58d23ef"
+content_hash = "sha256:7da488f441ec7a9279f7f760ac5b6778fa554828cb739a66e7b0bd3f275a29a3"
+size = 12898
+mtime_ms = 1790347719917
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:e7ae6910-eb6f-41ae-b000-68191a6c03fe/6e36882d-ad0d-4e56-bf1b-dcbcd58d23ef/04143478-d9ca-40bd-967c-1d4c759e712b"
+storage_version_token = "1790347840186838"
+content_type = "image/png"
+
+[[outputs]]
+id = "y88zvqexnjRtgOjSdqjLU"
+uri = "file://client/public/logo-light.png"
+type = "image"
+title = "EventHQ light-surface logo"
+description = "Transparent logo with dark lettering for light backgrounds."
+logical_id = "318c7822-3772-481d-81dc-da9f6af71592"
+content_hash = "sha256:cfb7b5324832994e9557be022d12942558ff54c6c1cc29e862e78752b6624aa3"
+size = 12936
+mtime_ms = 1790347719935
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:e7ae6910-eb6f-41ae-b000-68191a6c03fe/318c7822-3772-481d-81dc-da9f6af71592/3b232355-d450-42ea-9cc7-6047d22cd319"
+storage_version_token = "1790347841483357"
+content_type = "image/png"
+
+[[outputs]]
+id = "ZRc6rhZ3sI2-m7hQKZ1jF"
+uri = "file://client/public/favicon.png"
+type = "image"
+title = "EventHQ browser icon"
+description = "Compact icon for browser tabs and bookmarks."
+logical_id = "582ba77c-1a4b-4192-8cea-65e44e8c44a3"
+content_hash = "sha256:d177dbfa059af386d2c6451fbb5bb07ab6e1715d75ed68a857cbe0158ca98086"
+size = 1407
+mtime_ms = 1790347719935
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:e7ae6910-eb6f-41ae-b000-68191a6c03fe/582ba77c-1a4b-4192-8cea-65e44e8c44a3/952153a9-4cd3-47e0-b15e-a28d7aef974e"
+storage_version_token = "1790347842782327"
+content_type = "image/png"

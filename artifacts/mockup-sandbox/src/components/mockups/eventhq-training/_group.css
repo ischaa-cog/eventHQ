@@ -1,0 +1,63 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  --sidebar: 211 48% 13%;
+  --sidebar-foreground: 210 35% 92%;
+  --sidebar-primary: 197 100% 68%;
+  --sidebar-primary-foreground: 211 48% 13%;
+  --sidebar-accent: 211 38% 20%;
+  --sidebar-accent-foreground: 210 35% 96%;
+  --sidebar-border: 211 31% 25%;
+  --sidebar-ring: 197 100% 68%;
+
+  --background: 211 42% 10%;
+  --foreground: 210 35% 94%;
+  --card: 211 37% 14%;
+  --card-foreground: 210 35% 94%;
+  --popover: 211 37% 14%;
+  --popover-foreground: 210 35% 94%;
+  --primary: 197 100% 62%;
+  --primary-foreground: 211 48% 13%;
+  --secondary: 211 30% 21%;
+  --secondary-foreground: 210 35% 94%;
+  --muted: 211 30% 21%;
+  --muted-foreground: 211 16% 68%;
+  --accent: 211 30% 21%;
+  --accent-foreground: 210 35% 94%;
+  --destructive: 4 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 211 25% 27%;
+  --input: 211 25% 27%;
+  --ring: 202 100% 61%;
+  --radius: 0.5rem;
+
+  --chart-1: 202 100% 61%;
+  --chart-2: 173 58% 39%;
+  --chart-3: 197 37% 24%;
+  --chart-4: 43 74% 66%;
+  --chart-5: 27 87% 67%;
+
+  --font-sans: 'DM Sans', sans-serif;
+  --font-heading: 'Space Grotesk', sans-serif;
+}
+
+.dark {
+  --background: 211 42% 10%;
+  --foreground: 210 35% 94%;
+  --card: 211 37% 14%;
+  --card-foreground: 210 35% 94%;
+  --popover: 211 37% 14%;
+  --popover-foreground: 210 35% 94%;
+  --secondary: 211 30% 21%;
+  --secondary-foreground: 210 35% 94%;
+  --muted: 211 30% 21%;
+  --muted-foreground: 211 16% 68%;
+  --accent: 211 30% 21%;
+  --accent-foreground: 210 35% 94%;
+  --border: 211 25% 27%;
+  --input: 211 25% 27%;
+}
+
+body {
+  background-image: radial-gradient(circle at 80% -10%, hsl(197 100% 54% / 0.09), transparent 32rem);
+}

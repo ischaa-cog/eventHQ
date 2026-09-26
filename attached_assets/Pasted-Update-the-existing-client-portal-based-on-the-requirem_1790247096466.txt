@@ -1,0 +1,63 @@
+Update the existing client portal based on the requirements below. First inspect the current app, database, authentication, and integrations. Reuse what is already working and preserve existing client data and functionality.
+
+## Goal
+
+Give each client one organized portal for training, their marketing calendar, sales, and event performance. The first release should have these main areas:
+
+1. Dashboard
+2. Training Lab
+3. Marketing Calendar
+4. Sales
+5. Event Tracker
+
+Add a simple link to the client’s Google Drive asset folder on the dashboard. We can expand the portal later.
+
+## Client access
+
+Each client must see only their own calendar, training resources, sales, events, and Drive link. Provide an admin view where our team can configure each client’s resources and connections. Follow the app’s existing login and role system.
+
+## Dashboard
+
+Show a useful snapshot for the selected date range:
+
+* Total sales and revenue across connected processors
+* Recent sales and revenue trend
+* Upcoming marketing calendar events
+* Recent event performance
+* Quick link to the client’s Google Drive asset folder
+
+Every number should come from connected data or a clearly identified manual entry. Show an empty state when data has not been configured; do not display invented figures.
+
+## Training Lab
+
+Organize videos into **Five-Day Challenges, Webinars, and Summits**. Include a separate **Partner SOPs** section. Admins should be able to add, edit, reorder, and remove resources, including a title, description, category, video or document link, and visibility by client. Clients should be able to browse and open the resources available to them.
+
+## Marketing Calendar
+
+Each client has a Google Calendar created for them. Display that calendar inside their portal so updates to Google Calendar appear here without duplicate manual entry. Provide month, week, and list views if practical. Admins must be able to configure the correct calendar for each client. Use the app’s existing Google integration if one exists; otherwise implement a secure connection and document the setup required. Show connection errors and the last successful sync clearly.
+
+## Sales
+
+Bring sales from **Elective, WAP, Stripe, and any other configured processor** into one unified sales view. Admins should be able to configure processors per client. Avoid duplicate transactions when data syncs again. Show transaction date, processor, customer or reference where permitted, amount, status, and any available event attribution. Support date and processor filters.
+
+Use net revenue or gross revenue consistently and label it clearly. Handle refunds and failed payments separately so dashboard totals are accurate. First inspect which integrations, APIs, webhooks, or existing data feeds are actually available. Do not claim a processor is live until its connection works.
+
+## Event Tracker
+
+Clients should be able to review performance for their **webinars, five-day challenges, and summits**. Show event history and trends for:
+
+* Registrations and attendance
+* Show-up rate
+* Ad spend
+* Sales and revenue
+* ROAS
+
+Allow an admin to enter or import metrics that are not available from integrations. Clearly label manually entered values. Define show-up rate and ROAS in the UI, and use the same formulas throughout the portal. Let clients create projections by changing inputs such as ad spend, expected registrations, show-up rate, conversion rate, and average sale value. Keep projections visually separate from actual results.
+
+## Build and verification
+
+Use the existing app’s styling and navigation. Make the pages responsive and provide loading, empty, and error states. Store credentials and tokens securely on the server; never expose them in client-side code or logs. Ensure every query and integration is scoped to the authenticated client.
+
+Start by reporting what already exists and which external connections or credentials are missing. Then implement everything that can be completed in the current project. Finish with a concise list of what works, what still needs credentials or vendor documentation, and how you tested client data separation, calculations, and sync behavior.
+
+For now, leave out the client profile and brand voice sections mentioned in the Loom video.
