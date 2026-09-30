@@ -100,12 +100,22 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
      assert.equal(futureList.some((r: any) => r.id === global.body.id), true);
      assert.equal(futureList.some((r: any) => r.id === added.body.id || r.id === shared.body.id), false);
      assert.equal((await request(clientB, `${pathA}/training/resources`)).status, 403);
-    assert.equal((await request(adminA, `${pathA}/calendar/connection`, "PATCH", { calendarId: "another-calendar" })).status, 403);
+    assert.equal((await request(clientA, `${pathA}/calendar/connection`, "PATCH", { calendarId: "client-calendar" })).status, 403);
+    assert.equal((await request(adminB, `${pathA}/calendar/connection`, "PATCH", { calendarId: "other-tenant-calendar" })).status, 403);
+    assert.equal((await request(adminA, `${pathA}/calendar/connection`, "PATCH", { calendarId: "not valid <script>" })).status, 400);
+    const embed = `<iframe src="https://calendar.google.com/calendar/embed?src=c_test%40group.calendar.google.com&amp;ctz=America%2FNew_York" frameborder="0"></iframe>`;
+    const savedCalendar = await request(adminA, `${pathA}/calendar/connection`, "PATCH", { calendarId: embed });
+    assert.equal(savedCalendar.status, 200);
+    assert.equal(savedCalendar.body.calendarId, "c_test@group.calendar.google.com");
+    const shareLink = `https://calendar.google.com/calendar/u/0?cid=${Buffer.from("c_share@group.calendar.google.com").toString("base64")}`;
+    assert.equal((await request(adminA, `${pathA}/calendar/connection`, "PATCH", { calendarId: shareLink })).body.calendarId, "c_share@group.calendar.google.com");
     assert.equal((await request(owner, `${pathA}/calendar/connection`, "PATCH", { calendarId: "nonexistent-test-calendar" })).status, 200);
     const connection = await request(clientA, `${pathA}/calendar/connection`);
     assert.equal(connection.status, 200);
+    assert.equal(connection.body.calendarId, "nonexistent-test-calendar");
     assert.equal(connection.body.connected, false);
-    assert.ok(connection.body.error);
+    if (process.env.REPLIT_CONNECTORS_HOSTNAME) assert.ok(connection.body.error);
+    else assert.equal(connection.body.error, null);
     assert.equal((await request(adminA, `${pathA}/calendar/sync`, "POST")).status, 403);
     assert.equal((await request(owner, `${pathA}/calendar/connection`, "PATCH", { calendarId: null })).status, 200);
 

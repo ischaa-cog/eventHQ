@@ -29,6 +29,21 @@ const projectionInput = z.object({
   conversionRate: z.coerce.number().finite().min(0).max(100),
   averageSaleValue: z.coerce.number().finite().min(0),
 });
+// Accepts a raw Calendar ID, a Google Calendar embed/public URL, or the full <iframe> snippet.
+const normalizeCalendarId = (input: string) => {
+  let value = input.trim();
+  const src = value.match(/[?&](?:src|cid)=([^&"'\s>]+)/);
+  if (src) {
+    try { value = decodeURIComponent(src[1]); } catch { return null; }
+  }
+  value = value.trim();
+  // "Get shareable link" URLs carry the ID base64-encoded in cid=.
+  if (src && !value.includes("@")) {
+    const decoded = Buffer.from(value, "base64").toString("utf8");
+    if (/^[^\s@]+@[^\s@]+$/.test(decoded)) value = decoded;
+  }
+  return value && value.length <= 500 && !/[\s<>"']/.test(value) ? value : null;
+};
 const fail = (res: any, code: number, message: string) => res.status(code).json({ error: message });
 const validDate = (s: any) => { const d = new Date(s); return Number.isNaN(d.getTime()) ? undefined : d; };
 const can = async (req: any, clientId: number, getUser: any, access: any) => {
@@ -121,6 +136,8 @@ export function registerPortalRoutes(
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
     const row = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId)))[0];
     if (!row) return res.json({ calendarId: null, lastSuccessfulSync: null, error: null, connected: false });
+    // The API connector only exists on Replit; elsewhere the calendar is shown via Google's embed.
+    if (!process.env.REPLIT_CONNECTORS_HOSTNAME) return res.json({ calendarId: row.calendarId, lastSuccessfulSync: row.lastSuccessfulSync, error: null, connected: false });
     let connected = false;
     try {
       const calendar = await getGoogleCalendarClient();
@@ -139,8 +156,13 @@ export function registerPortalRoutes(
   });
   app.patch("/api/clients/:id/calendar/connection", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
-    if ((await getRequestUser(req))?.role !== "owner") return fail(res, 403, "Only the owner can configure the shared Google Calendar connector");
-    const parsed = z.object({ calendarId: z.string().trim().max(500).nullable() }).safeParse(req.body); if (!parsed.success) return fail(res, 400, "Valid calendarId required");
+    if (!admin(await getRequestUser(req))) return fail(res, 403, "Admin access required");
+    const parsed = z.object({ calendarId: z.string().trim().max(4000).nullable() }).safeParse(req.body); if (!parsed.success) return fail(res, 400, "Valid calendarId required");
+    if (parsed.data.calendarId) {
+      const calendarId = normalizeCalendarId(parsed.data.calendarId);
+      if (!calendarId) return fail(res, 400, "Paste a Google Calendar ID or embed link");
+      parsed.data.calendarId = calendarId;
+    }
     if (!parsed.data.calendarId) {
       await db.delete(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId));
       return res.json({ calendarId: null, connected: false, lastSuccessfulSync: null, error: null });

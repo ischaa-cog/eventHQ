@@ -36,7 +36,8 @@ export default function MarketingCalendarPage() {
   const clientId = params.id;
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [view, setView] = useState<"list" | "calendar" | "week">("list");
+  const [view, setView] = useState<"list" | "calendar" | "week" | "google">("list");
+  const [viewChosen, setViewChosen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<CalendarEntry | null>(null);
@@ -60,7 +61,7 @@ export default function MarketingCalendarPage() {
   const [localSyncError, setLocalSyncError] = useState<string | null>(null);
 
   const canEdit = user?.role === "owner" || user?.role === "agency_admin";
-  const canConfigure = user?.role === "owner";
+  const canConfigure = canEdit;
 
   const { data: entries = [], isLoading } = useQuery<CalendarEntry[]>({
     queryKey: [`/api/clients/${clientId}/calendar`],
@@ -73,9 +74,22 @@ export default function MarketingCalendarPage() {
   const rawConnection = connectionQuery.data;
   const connection = rawConnection as { calendarId: string | null; lastSuccessfulSync: string | null; error: string | null; connected: boolean } | undefined;
   useEffect(() => { if (connection) setCalendarId(connection.calendarId || ""); }, [connection?.calendarId]);
+  const googleCalendarId = connection?.calendarId || null;
+  useEffect(() => {
+    if (googleCalendarId && !viewChosen) setView("google");
+    if (!googleCalendarId && view === "google") setView("list");
+  }, [googleCalendarId]);
+  const googleEmbedUrl = googleCalendarId
+    ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(googleCalendarId)}&ctz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}&mode=MONTH&showPrint=0&showTitle=0`
+    : null;
   const connectionMutation = useMutation({
     mutationFn: () => apiRequest("PATCH", `/api/clients/${clientId}/calendar/connection`, { calendarId: calendarId || null }),
-    onSuccess: () => { setConfigOpen(false); queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/calendar/connection`] }); },
+    onSuccess: async (res) => {
+      const saved = await res.json();
+      setConfigOpen(false);
+      if (saved?.calendarId) { setView("google"); setViewChosen(true); }
+      queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/calendar/connection`] });
+    },
   });
   const syncMutation = useMutation({
     mutationFn: () => apiRequest("POST", `/api/clients/${clientId}/calendar/sync`),
@@ -247,7 +261,7 @@ export default function MarketingCalendarPage() {
     <AppLayout title="Marketing Calendar" mode="client">
       <div className="space-y-6" data-testid="marketing-calendar-container">
         {/* Date Filter */}
-        <div className="flex flex-wrap items-center gap-3 p-4 bg-muted/50 rounded-lg border">
+        {view !== "google" && <div className="flex flex-wrap items-center gap-3 p-4 bg-muted/50 rounded-lg border">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground font-medium">Filter by date:</span>
           
@@ -314,12 +328,18 @@ export default function MarketingCalendarPage() {
               </Badge>
             </>
           )}
-        </div>
+        </div>}
 
         <div className="flex items-center justify-end">
           <div className="flex items-center gap-4">
-            <Tabs value={view} onValueChange={(v) => setView(v as "list" | "calendar" | "week")}>
+            <Tabs value={view} onValueChange={(v) => { setView(v as typeof view); setViewChosen(true); }}>
               <TabsList>
+                {googleCalendarId && (
+                  <TabsTrigger value="google" data-testid="view-google">
+                    <Calendar className="h-4 w-4 mr-2" />
+                    Google Calendar
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="list" data-testid="view-list">
                   <List className="h-4 w-4 mr-2" />
                   List
@@ -332,8 +352,8 @@ export default function MarketingCalendarPage() {
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-2 text-sm">
-              <span className={connection?.connected ? "text-green-600" : "text-muted-foreground"}>
-                {connectionQuery.isError ? "Connection status unavailable" : connection?.connected ? "Calendar connected" : "Calendar not connected"}
+              <span className={googleCalendarId ? "text-green-600" : "text-muted-foreground"}>
+                {connectionQuery.isError ? "Connection status unavailable" : googleCalendarId ? "Google Calendar linked" : "Google Calendar not linked"}
               </span>
               {connection?.lastSuccessfulSync && <span className="text-muted-foreground">Last sync {format(new Date(connection.lastSuccessfulSync), "MMM d, h:mm a")}</span>}
               {canConfigure && <><Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}><Settings className="h-4 w-4 mr-1" />Configure</Button>{connection?.connected && <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}><RefreshCw className="h-4 w-4 mr-1" />Sync</Button>}</>}
@@ -464,7 +484,33 @@ export default function MarketingCalendarPage() {
           </div>
         </div>
 
-        {isLoading ? (
+        {view === "google" && googleEmbedUrl ? (
+          <Card>
+            <CardContent className="pt-6 space-y-3">
+              <iframe
+                src={googleEmbedUrl}
+                title="Google Calendar"
+                className="w-full h-[700px] rounded-lg border"
+                frameBorder={0}
+                scrolling="no"
+                data-testid="google-calendar-embed"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                <span>Don't see events? Make sure you're signed into the Google account this calendar is shared with.</span>
+                <a
+                  href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(googleCalendarId!)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                  data-testid="link-open-google-calendar"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Open in Google Calendar
+                </a>
+              </div>
+            </CardContent>
+          </Card>
+        ) : isLoading ? (
           <div className="text-center py-12">
             <div className="animate-pulse space-y-4">
               <div className="h-4 bg-muted rounded w-3/4 mx-auto"></div>
@@ -808,7 +854,12 @@ export default function MarketingCalendarPage() {
         <Dialog open={configOpen} onOpenChange={setConfigOpen}>
           <DialogContent><DialogHeader><DialogTitle>Calendar connection</DialogTitle></DialogHeader>
             <form className="space-y-4" onSubmit={e => { e.preventDefault(); connectionMutation.mutate(); }}>
-              <div className="space-y-2"><Label htmlFor="calendar-id">Calendar ID</Label><Input id="calendar-id" value={calendarId} onChange={e => setCalendarId(e.target.value)} placeholder="your-calendar-id" /><p className="text-xs text-muted-foreground">Leave blank to disconnect this client calendar.</p></div>
+              <div className="space-y-2"><Label htmlFor="calendar-id">Google Calendar ID or embed link</Label><Input id="calendar-id" value={calendarId} onChange={e => setCalendarId(e.target.value)} placeholder="abc123@group.calendar.google.com" data-testid="input-calendar-id" /><p className="text-xs text-muted-foreground">Leave blank to unlink this client's calendar.</p></div>
+              <ol className="list-decimal pl-5 text-xs text-muted-foreground space-y-1">
+                <li>In Google Calendar, open Settings, pick this client's calendar, then scroll to <span className="font-medium">Integrate calendar</span> and copy the Calendar ID (or the embed code).</li>
+                <li>Under <span className="font-medium">Share with specific people</span>, add the client's Google email so they can see events.</li>
+                <li>Paste the ID or embed code above and save.</li>
+              </ol>
               {connection?.error && <p className="text-sm text-destructive">{connection.error}</p>}
               {connectionMutation.isError && <p className="text-sm text-destructive">Could not save the calendar connection.</p>}
               <DialogFooter><Button type="submit" disabled={connectionMutation.isPending}>{connectionMutation.isPending ? "Saving…" : "Save connection"}</Button></DialogFooter>
