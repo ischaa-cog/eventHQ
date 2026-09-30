@@ -36,8 +36,7 @@ export default function MarketingCalendarPage() {
   const clientId = params.id;
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [view, setView] = useState<"list" | "calendar" | "week" | "google">("list");
-  const [viewChosen, setViewChosen] = useState(false);
+  const [view, setView] = useState<"list" | "calendar" | "week" | "google">("google");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<CalendarEntry | null>(null);
@@ -75,10 +74,6 @@ export default function MarketingCalendarPage() {
   const connection = rawConnection as { calendarId: string | null; lastSuccessfulSync: string | null; error: string | null; connected: boolean } | undefined;
   useEffect(() => { if (connection) setCalendarId(connection.calendarId || ""); }, [connection?.calendarId]);
   const googleCalendarId = connection?.calendarId || null;
-  useEffect(() => {
-    if (googleCalendarId && !viewChosen) setView("google");
-    if (!googleCalendarId && view === "google") setView("list");
-  }, [googleCalendarId]);
   const googleEmbedUrl = googleCalendarId
     ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(googleCalendarId)}&ctz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}&mode=MONTH&showPrint=0&showTitle=0`
     : null;
@@ -87,7 +82,7 @@ export default function MarketingCalendarPage() {
     onSuccess: async (res) => {
       const saved = await res.json();
       setConfigOpen(false);
-      if (saved?.calendarId) { setView("google"); setViewChosen(true); }
+      if (saved?.calendarId) setView("google");
       queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/calendar/connection`] });
     },
   });
@@ -332,14 +327,12 @@ export default function MarketingCalendarPage() {
 
         <div className="flex items-center justify-end">
           <div className="flex items-center gap-4">
-            <Tabs value={view} onValueChange={(v) => { setView(v as typeof view); setViewChosen(true); }}>
+            <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
               <TabsList>
-                {googleCalendarId && (
-                  <TabsTrigger value="google" data-testid="view-google">
-                    <Calendar className="h-4 w-4 mr-2" />
-                    Google Calendar
-                  </TabsTrigger>
-                )}
+                <TabsTrigger value="google" data-testid="view-google">
+                  <Calendar className="h-4 w-4 mr-2" />
+                  Google Calendar
+                </TabsTrigger>
                 <TabsTrigger value="list" data-testid="view-list">
                   <List className="h-4 w-4 mr-2" />
                   List
@@ -484,7 +477,29 @@ export default function MarketingCalendarPage() {
           </div>
         </div>
 
-        {view === "google" && googleEmbedUrl ? (
+        {view === "google" && !googleEmbedUrl ? (
+          <Card>
+            <CardContent className="py-12 text-center space-y-4" data-testid="google-calendar-empty">
+              <Calendar className="h-12 w-12 mx-auto text-muted-foreground" />
+              <div className="space-y-1">
+                {!connectionQuery.isLoading && <p className="font-medium">No Google Calendar linked yet</p>}
+                <p className="text-sm text-muted-foreground">
+                  {connectionQuery.isLoading
+                    ? "Checking for a linked calendar…"
+                    : canConfigure
+                      ? "Link this client's Google Calendar to show it here for your team and the client."
+                      : "Your project manager hasn't linked your Google Calendar yet."}
+                </p>
+              </div>
+              {canConfigure && !connectionQuery.isLoading && (
+                <Button onClick={() => setConfigOpen(true)} data-testid="button-link-google-calendar">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Link Google Calendar
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : view === "google" && googleEmbedUrl ? (
           <Card>
             <CardContent className="pt-6 space-y-3">
               <iframe
