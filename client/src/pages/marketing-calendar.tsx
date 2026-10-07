@@ -36,8 +36,7 @@ export default function MarketingCalendarPage() {
   const clientId = params.id;
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [view, setView] = useState<"list" | "calendar" | "week" | "google">("calendar");
-  const [viewChosen, setViewChosen] = useState(false);
+  const [view, setView] = useState<"list" | "calendar" | "week">("calendar");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<CalendarEntry | null>(null);
@@ -75,19 +74,10 @@ export default function MarketingCalendarPage() {
   const connection = rawConnection as { calendarId: string | null; lastSuccessfulSync: string | null; error: string | null; connected: boolean } | undefined;
   useEffect(() => { if (connection) setCalendarId(connection.calendarId || ""); }, [connection?.calendarId]);
   const googleCalendarId = connection?.calendarId || null;
-  // Open on the linked Google Calendar when there is one; otherwise on the month view of this workspace's entries.
-  useEffect(() => {
-    if (googleCalendarId && !viewChosen) setView("google");
-  }, [googleCalendarId]);
-  const googleEmbedUrl = googleCalendarId
-    ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(googleCalendarId)}&ctz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}&mode=MONTH&showPrint=0&showTitle=0`
-    : null;
   const connectionMutation = useMutation({
     mutationFn: () => apiRequest("PATCH", `/api/clients/${clientId}/calendar/connection`, { calendarId: calendarId || null }),
-    onSuccess: async (res) => {
-      const saved = await res.json();
+    onSuccess: () => {
       setConfigOpen(false);
-      if (saved?.calendarId) setView("google");
       queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/calendar/connection`] });
     },
   });
@@ -261,7 +251,7 @@ export default function MarketingCalendarPage() {
     <AppLayout title="Marketing Calendar" mode="client">
       <div className="space-y-6" data-testid="marketing-calendar-container">
         {/* Date Filter */}
-        {view !== "google" && <div className="flex flex-wrap items-center gap-3 p-4 bg-muted/50 rounded-lg border">
+        <div className="flex flex-wrap items-center gap-3 p-4 bg-muted/50 rounded-lg border">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground font-medium">Filter by date:</span>
           
@@ -328,16 +318,12 @@ export default function MarketingCalendarPage() {
               </Badge>
             </>
           )}
-        </div>}
+        </div>
 
         <div className="flex items-center justify-end">
           <div className="flex items-center gap-4">
-            <Tabs value={view} onValueChange={(v) => { setView(v as typeof view); setViewChosen(true); }}>
+            <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
               <TabsList>
-                <TabsTrigger value="google" data-testid="view-google">
-                  <Calendar className="h-4 w-4 mr-2" />
-                  Google Calendar
-                </TabsTrigger>
                 <TabsTrigger value="list" data-testid="view-list">
                   <List className="h-4 w-4 mr-2" />
                   List
@@ -482,55 +468,7 @@ export default function MarketingCalendarPage() {
           </div>
         </div>
 
-        {view === "google" && !googleEmbedUrl ? (
-          <Card>
-            <CardContent className="py-12 text-center space-y-4" data-testid="google-calendar-empty">
-              <Calendar className="h-12 w-12 mx-auto text-muted-foreground" />
-              <div className="space-y-1">
-                {!connectionQuery.isLoading && <p className="font-medium">No Google Calendar linked yet</p>}
-                <p className="text-sm text-muted-foreground">
-                  {connectionQuery.isLoading
-                    ? "Checking for a linked calendar…"
-                    : canConfigure
-                      ? "Link this client's Google Calendar to show it here for your team and the client."
-                      : "Your project manager hasn't linked your Google Calendar yet."}
-                </p>
-              </div>
-              {canConfigure && !connectionQuery.isLoading && (
-                <Button onClick={() => setConfigOpen(true)} data-testid="button-link-google-calendar">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Link Google Calendar
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ) : view === "google" && googleEmbedUrl ? (
-          <Card>
-            <CardContent className="pt-6 space-y-3">
-              <iframe
-                src={googleEmbedUrl}
-                title="Google Calendar"
-                className="w-full h-[700px] rounded-lg border"
-                frameBorder={0}
-                scrolling="no"
-                data-testid="google-calendar-embed"
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-                <span>Don't see events? Make sure you're signed into the Google account this calendar is shared with.</span>
-                <a
-                  href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(googleCalendarId!)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-primary hover:underline"
-                  data-testid="link-open-google-calendar"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Open in Google Calendar
-                </a>
-              </div>
-            </CardContent>
-          </Card>
-        ) : isLoading ? (
+        {isLoading ? (
           <div className="text-center py-12">
             <div className="animate-pulse space-y-4">
               <div className="h-4 bg-muted rounded w-3/4 mx-auto"></div>

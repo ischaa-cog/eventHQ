@@ -244,6 +244,7 @@
 }
 
 .training-lesson-panel {
+  min-width: 0;
   padding: 28px 25px;
 }
 
@@ -372,8 +373,16 @@
 
 .training-lesson-name {
   flex: 1;
+  min-width: 0;
   font-size: 12px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.training-lesson > div,
+.training-lesson > .training-whop-tag {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .training-check {

@@ -205,7 +205,6 @@ export default function TrainingLabPage() {
                         <span className="training-lesson-num">{String(index + 1).padStart(2, "0")}</span>
                         <span className="training-play-dot" aria-hidden="true">{isSelected ? <Play size={11} fill="currentColor" /> : <span />}</span>
                         <span className="training-lesson-name">{resource.title}</span>
-                        {resource.isGlobal && !readOnly && <Badge variant="secondary">Shared</Badge>}
                         {!readOnly && canEdit && resource.resourceType === "video" && !vimeoPlayerUrl(resource.url) && (isWhopLink(resource.url)
                           ? <span className="training-whop-tag" title="Hosted on Whop, so it can't play inside EventHQ. Re-host it on Vimeo to play it here."><WhopMark size={14} />Whop</span>
                           : <Badge variant="outline" className="border-rose-500/60 text-rose-600" title="This video can't play inside EventHQ. Re-host it on Vimeo and update the link.">Not playable here</Badge>)}
