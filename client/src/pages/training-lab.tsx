@@ -7,13 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ArrowRight, Check, ChevronRight, ChevronUp, ChevronDown, ExternalLink, Pencil, Play, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, ChevronUp, ChevronDown, ExternalLink, Pencil, Play, Plus, Search, Trash2, Upload } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useMemo, useState } from "react";
 import { useRoute } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { sortTrainingResources, vimeoPlayerUrl } from "@/lib/training-resources";
+import { BulkUploadDialog } from "@/components/training/BulkUploadDialog";
+import { useToast } from "@/hooks/use-toast";
 import "./training-lab.css";
 
 type Category = "challenge" | "marketing" | "masterclass" | "bonus_training" | "webinar" | "summit" | "partner_sop";
@@ -48,6 +50,8 @@ export default function TrainingLabPage() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Resource | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const { toast } = useToast();
   const [form, setForm] = useState<Form>({
     title: "", description: "", category: "marketing", resourceType: "video", url: "", orderIndex: 0,
     visibleClientIds: clientId ? [Number(clientId)] : [], isGlobal: false,
@@ -164,7 +168,10 @@ export default function TrainingLabPage() {
                 <div><div className="training-kicker">NOW BROWSING / {selectedCategory.eyebrow}</div><h2>{selectedCategory.label}</h2><p>{selectedCategory.detail}</p></div>
                 <div className="training-lesson-count"><b>{categoryResources.length.toString().padStart(2, "0")}</b><span>lessons</span></div>
               </div>
-              {canEdit && !preview && <Button className="training-add-category" variant="outline" size="sm" onClick={() => openEditor(undefined, activeCategory)}><Plus size={15} />Add lesson</Button>}
+              {canEdit && !preview && <div className="training-add-category flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => openEditor(undefined, activeCategory)}><Plus size={15} />Add lesson</Button>
+                <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} data-testid="button-bulk-upload"><Upload size={15} />Bulk upload</Button>
+              </div>}
               {categoryResources.length === 0 ? <div className="training-empty"><span className="training-empty-ring" aria-hidden="true">+</span><h3>No lessons here yet.</h3><p>Resources for {selectedCategory.label.toLowerCase()} will appear here when they’re available.</p></div> : <>
                 <label className="training-search"><Search size={16} aria-hidden="true" /><Input value={search} onChange={event => setSearch(event.target.value)} placeholder="Find a lesson" aria-label="Search lessons in this category" /></label>
                 <div className="training-lesson-list" role="list" aria-label={`${selectedCategory.label} lessons`}>
@@ -230,6 +237,9 @@ export default function TrainingLabPage() {
           </form>
         </DialogContent>
       </Dialog>
+      {canEdit && clientId && <BulkUploadDialog open={bulkOpen} onOpenChange={setBulkOpen} clientId={clientId} isOwner={isOwner}
+        clients={clients.data || []} defaultCategory={activeCategory === "webinar" ? "masterclass" : activeCategory}
+        onImported={count => { qc.invalidateQueries({ queryKey }); toast({ title: `${count} lesson${count === 1 ? "" : "s"} added` }); }} />}
     </div>
   </AppLayout>;
 }

@@ -100,6 +100,31 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
      assert.equal(futureList.some((r: any) => r.id === global.body.id), true);
      assert.equal(futureList.some((r: any) => r.id === added.body.id || r.id === shared.body.id), false);
      assert.equal((await request(clientB, `${pathA}/training/resources`)).status, 403);
+    // Bulk upload: admin-only, tenant-scoped, and all-or-nothing.
+    const bulkRows = [
+      { title: `Bulk one ${marker}`, url: "https://vimeo.com/123456789", category: "marketing", resourceType: "video" },
+      { title: `Bulk two ${marker}`, url: "https://example.com/guide.pdf", category: "summit", resourceType: "document", description: "Read first" },
+    ];
+    const bulkPath = `${pathA}/training/resources/bulk`;
+    assert.equal((await request(clientA, bulkPath, "POST", { resources: bulkRows })).status, 403);
+    assert.equal((await request(adminB, bulkPath, "POST", { resources: bulkRows })).status, 403);
+    assert.equal((await request(adminA, bulkPath, "POST", { resources: bulkRows, isGlobal: true })).status, 403);
+    assert.equal((await request(adminA, bulkPath, "POST", { resources: bulkRows, visibleClientIds: [ca.id, cb.id] })).status, 403);
+    const badBulk = await request(adminA, bulkPath, "POST", { resources: [...bulkRows, { title: `Bulk bad ${marker}`, url: "not-a-url", category: "marketing", resourceType: "video" }] });
+    assert.equal(badBulk.status, 400);
+    assert.match(badBulk.body.error, /^Row 3:/);
+    const bulkTitles = () => db.select().from(trainingResources).where(like(trainingResources.title, `Bulk % ${marker}`));
+    assert.equal((await bulkTitles()).length, 0);
+    const bulk = await request(adminA, bulkPath, "POST", { resources: bulkRows });
+    assert.equal(bulk.status, 201);
+    assert.equal(bulk.body.created, 2);
+    const imported = await bulkTitles();
+    assert.equal(imported.length, 2);
+    assert.ok(imported.every(r => !r.isGlobal && r.visibleClientIds.length === 1 && r.visibleClientIds[0] === ca.id));
+    const clientView = (await request(clientA, `${pathA}/training/resources`)).body;
+    assert.ok(imported.every(r => clientView.some((v: any) => v.id === r.id)));
+    resourceIds.push(...imported.map(r => r.id));
+
     assert.equal((await request(clientA, `${pathA}/calendar/connection`, "PATCH", { calendarId: "client-calendar" })).status, 403);
     assert.equal((await request(adminB, `${pathA}/calendar/connection`, "PATCH", { calendarId: "other-tenant-calendar" })).status, 403);
     assert.equal((await request(adminA, `${pathA}/calendar/connection`, "PATCH", { calendarId: "not valid <script>" })).status, 400);

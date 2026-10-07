@@ -5,6 +5,7 @@ import { isAuthenticated } from "./auth";
 import { db } from "./storage";
 import { getGoogleCalendarClient } from "./googleCalendar";
 import { netSaleContribution } from "./sales-math";
+import { BULK_TRAINING_MAX_ROWS } from "@shared/training-bulk";
 import {
   trainingResources, trainingModules, trainingVideos, clientCalendarConnections, clients,
   salesSources, sales, calendarEntries, eventPerformance, projections,
@@ -92,17 +93,57 @@ export function registerPortalRoutes(
       res.json([...legacy, ...visible]);
     } catch { fail(res, 500, "Failed to fetch training resources"); }
   });
+  // Who may see new resources: shared (owner only) or a client list that includes the
+  // target workspace and stays inside the admin's tenant. Returns an error or the ids.
+  const resolveVisibility = async (u: User, clientId: number, isGlobal: boolean | undefined, requested: number[] | undefined):
+    Promise<{ status: number; error: string } | { ids: number[] }> => {
+    if (isGlobal && u.role !== "owner") return { status: 403, error: "Only the owner can publish shared resources" };
+    if (isGlobal && requested?.length) return { status: 400, error: "Shared resources cannot have a client list" };
+    const ids = isGlobal ? [] : requested || [];
+    if (!isGlobal && !ids.includes(clientId)) return { status: 400, error: "Resource must include the target client" };
+    if (u.role !== "owner") for (const id of ids) if (!(await canAccessClient(u, id))) return { status: 403, error: "A resource cannot be assigned outside your tenant" };
+    return { ids };
+  };
   app.post("/api/clients/:id/training/resources", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
     const u = await getRequestUser(req); if (!admin(u) || !u) return fail(res, 403, "Admin access required");
     const parsed = resourceInput.safeParse({ ...req.body, visibleClientIds: req.body?.visibleClientIds ?? (req.body?.isGlobal ? [] : [clientId]) });
     if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message);
-    if (parsed.data.isGlobal && u.role !== "owner") return fail(res, 403, "Only the owner can publish shared resources");
-    const visibleIds = parsed.data.isGlobal ? [] : parsed.data.visibleClientIds || [];
-    if (parsed.data.isGlobal && parsed.data.visibleClientIds?.length) return fail(res, 400, "Shared resources cannot have a client list");
-    if (!parsed.data.isGlobal && !visibleIds.includes(clientId)) return fail(res, 400, "Resource must include the target client");
-    if (u.role !== "owner") for (const id of visibleIds) if (!(await canAccessClient(u, id))) return fail(res, 403, "A resource cannot be assigned outside your tenant");
-    try { res.status(201).json((await db.insert(trainingResources).values({ ...parsed.data, visibleClientIds: visibleIds }).returning())[0]); } catch { fail(res, 400, "Failed to create resource"); }
+    const visibility = await resolveVisibility(u, clientId, parsed.data.isGlobal, parsed.data.visibleClientIds);
+    if ("error" in visibility) return fail(res, visibility.status, visibility.error);
+    try { res.status(201).json((await db.insert(trainingResources).values({ ...parsed.data, visibleClientIds: visibility.ids }).returning())[0]); } catch { fail(res, 400, "Failed to create resource"); }
+  });
+  // Bulk upload: every row is validated first and all rows are saved together, or none are.
+  app.post("/api/clients/:id/training/resources/bulk", isAuthenticated, async (req: any, res) => {
+    const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
+    const u = await getRequestUser(req); if (!admin(u) || !u) return fail(res, 403, "Admin access required");
+    const rows = req.body?.resources;
+    if (!Array.isArray(rows) || rows.length === 0) return fail(res, 400, "Add at least one lesson");
+    if (rows.length > BULK_TRAINING_MAX_ROWS) return fail(res, 400, `Upload at most ${BULK_TRAINING_MAX_ROWS} lessons at a time`);
+    const isGlobal = req.body?.isGlobal === true;
+    const visibility = await resolveVisibility(u, clientId, isGlobal, isGlobal ? req.body?.visibleClientIds : (req.body?.visibleClientIds ?? [clientId]));
+    if ("error" in visibility) return fail(res, visibility.status, visibility.error);
+    const shape = resourceInput.pick({ title: true, description: true, category: true, resourceType: true, url: true });
+    const valid = [];
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = shape.safeParse(rows[i]);
+      if (!parsed.success) return fail(res, 400, `Row ${i + 1}: ${parsed.error.issues[0].message}`);
+      valid.push(parsed.data);
+    }
+    // Append after the lessons already in each category.
+    const existing = await db.select({ category: trainingResources.category, orderIndex: trainingResources.orderIndex }).from(trainingResources);
+    const next = new Map<string, number>();
+    for (const r of existing) next.set(r.category, Math.max(next.get(r.category) ?? 0, r.orderIndex + 10));
+    const values = valid.map(row => {
+      const orderIndex = next.get(row.category) ?? 0;
+      next.set(row.category, orderIndex + 10);
+      return { ...row, description: row.description || null, orderIndex, isGlobal, visibleClientIds: visibility.ids };
+    });
+    try {
+      // One multi-row insert, so a failure leaves nothing half-imported.
+      const created = await db.insert(trainingResources).values(values).returning();
+      res.status(201).json({ created: created.length });
+    } catch { fail(res, 400, "Failed to save the lessons. Nothing was added."); }
   });
   app.patch("/api/training/resources/:id", isAuthenticated, async (req: any, res) => {
     const u = await getRequestUser(req); if (!admin(u) || !u) return fail(res, 403, "Admin access required");
