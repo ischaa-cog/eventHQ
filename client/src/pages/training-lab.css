@@ -506,6 +506,51 @@
   gap: 8px;
 }
 
+.training-whop-tag {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 3px;
+  border: 1px solid #fbd3c6;
+  border-radius: 999px;
+  background: #fff5f1;
+  color: #c2410c;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.training-whop-mark {
+  flex-shrink: 0;
+  border-radius: 22%;
+}
+
+.training-whop-copy strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #e8f3f2;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.training-whop-copy p {
+  margin: 0;
+}
+
+.training-resource-open a.training-whop-button {
+  padding: 9px 16px;
+  border-radius: 6px;
+  background: #fa4616;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.training-resource-open a.training-whop-button:hover {
+  background: #e03a0c;
+}
+
 .training-player-meta {
   display: flex;
   align-items: flex-end;
