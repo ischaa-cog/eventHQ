@@ -247,7 +247,7 @@ export default function AdminPage() {
       password: newUserPassword,
       role: newUserRole,
       agencyId: newUserAgency ? parseInt(newUserAgency) : undefined,
-      clientAccess: newUserRole === "agency_client" ? newUserClients : undefined,
+      clientAccess: newUserRole === "agency_client" || newUserRole === "team_member" ? newUserClients : undefined,
     });
   };
 
@@ -260,8 +260,11 @@ export default function AdminPage() {
   };
 
   // A client account opens exactly one workspace.
+  // Clients get exactly one workspace; team members can be assigned several.
   const toggleNewUserClient = (clientId: number) => {
-    setNewUserClients(prev => prev.includes(clientId) ? [] : [clientId]);
+    setNewUserClients(prev => prev.includes(clientId)
+      ? prev.filter(id => id !== clientId)
+      : newUserRole === "team_member" ? [...prev, clientId] : [clientId]);
   };
 
   const updateAgencyMutation = useMutation({
@@ -339,7 +342,7 @@ export default function AdminPage() {
   const handleEditUser = (user: User) => {
     setEditingUser(user);
     setResetPassword(generatePassword());
-    setSelectedRole(user.role === "agency_client" ? "agency_client" : "agency_admin");
+    setSelectedRole(user.role === "agency_client" || user.role === "team_member" ? user.role : "agency_admin");
     setSelectedAgency(user.agencyId?.toString() || "");
     setSelectedClients(user.clientAccess || []);
   };
@@ -350,12 +353,14 @@ export default function AdminPage() {
       userId: editingUser.id,
       role: selectedRole,
       agencyId: selectedAgency ? parseInt(selectedAgency) : undefined,
-      clientAccess: selectedRole === "agency_client" ? selectedClients : undefined,
+      clientAccess: selectedRole === "agency_client" || selectedRole === "team_member" ? selectedClients : undefined,
     });
   };
 
   const toggleClientAccess = (clientId: number) => {
-    setSelectedClients(prev => prev.includes(clientId) ? [] : [clientId]);
+    setSelectedClients(prev => prev.includes(clientId)
+      ? prev.filter(id => id !== clientId)
+      : selectedRole === "team_member" ? [...prev, clientId] : [clientId]);
   };
 
   const getRoleBadge = (role: string | null) => {
@@ -363,6 +368,8 @@ export default function AdminPage() {
       case "owner":
       case "agency_admin":
         return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Admin</Badge>;
+      case "team_member":
+        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Team Member</Badge>;
       case "agency_employee":
         return <Badge variant="outline">Disabled</Badge>;
       case "agency_client":
@@ -528,7 +535,7 @@ export default function AdminPage() {
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-lg font-medium">User Management</h3>
-                  <p className="text-sm text-muted-foreground">Admin and Client accounts. Former employee accounts are disabled.</p>
+                  <p className="text-sm text-muted-foreground">Admin, Team Member, and Client accounts. Former employee accounts are disabled.</p>
                 </div>
                 <Dialog open={addUserOpen} onOpenChange={(open) => { setAddUserOpen(open); if (open) resetAddUserForm(); }}>
                   <DialogTrigger asChild>
@@ -562,18 +569,19 @@ export default function AdminPage() {
 
                       <div className="space-y-2">
                         <Label>Role</Label>
-                        <Select value={newUserRole} onValueChange={setNewUserRole}>
+                        <Select value={newUserRole} onValueChange={(value) => { setNewUserRole(value); setNewUserClients([]); }}>
                           <SelectTrigger data-testid="select-new-user-role">
                             <SelectValue placeholder="Select role" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="agency_admin">Admin</SelectItem>
+                            <SelectItem value="team_member">Team Member</SelectItem>
                             <SelectItem value="agency_client">Client</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
 
-                      {(newUserRole === "agency_admin" || newUserRole === "agency_client") && (
+                      {(newUserRole === "agency_admin" || newUserRole === "team_member" || newUserRole === "agency_client") && (
                         <div className="space-y-2">
                           <Label>Agency</Label>
                           <Select value={newUserAgency} onValueChange={(value) => { setNewUserAgency(value); setNewUserClients([]); }}>
@@ -591,9 +599,9 @@ export default function AdminPage() {
                         </div>
                       )}
 
-                      {newUserRole === "agency_client" && newUserAgency && (
+                      {(newUserRole === "agency_client" || newUserRole === "team_member") && newUserAgency && (
                         <div className="space-y-2">
-                          <Label>Workspace (choose one)</Label>
+                          <Label>{newUserRole === "team_member" ? "Workspaces they work on" : "Workspace (choose one)"}</Label>
                           <div className="grid gap-2 max-h-48 overflow-y-auto border rounded-md p-2">
                             {clients
                               .filter(c => c.agencyId === parseInt(newUserAgency))
@@ -618,7 +626,8 @@ export default function AdminPage() {
                         onClick={handleCreateUser}
                         className="w-full"
                         disabled={createUserMutation.isPending || !newUserEmail.trim() || newUserPassword.length < 8 || !newUserAgency ||
-                          (newUserRole === "agency_client" && newUserClients.length !== 1)}
+                          (newUserRole === "agency_client" && newUserClients.length !== 1) ||
+                          (newUserRole === "team_member" && newUserClients.length === 0)}
                         data-testid="button-create-user"
                       >
                         {createUserMutation.isPending ? "Creating..." : "Create User"}
@@ -680,22 +689,24 @@ export default function AdminPage() {
                               
                               <div className="space-y-2">
                                 <Label>Role</Label>
-                                <Select value={selectedRole} onValueChange={setSelectedRole}>
+                                <Select value={selectedRole} onValueChange={(value) => { setSelectedRole(value); if (value === "agency_client" && selectedClients.length > 1) setSelectedClients([]); }}>
                                   <SelectTrigger data-testid="select-role">
                                     <SelectValue placeholder="Select role" />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="agency_admin">Admin</SelectItem>
+                                    {user.role !== "owner" && <SelectItem value="team_member">Team Member</SelectItem>}
                                     <SelectItem value="agency_client">Client</SelectItem>
                                   </SelectContent>
                                 </Select>
                                 <p className="text-xs text-muted-foreground">
                                   {selectedRole === "agency_admin" && "Can manage an agency and its clients."}
+                                  {selectedRole === "team_member" && "Works in their assigned workspaces: events, assets, content, calendar entries and client details. Can't manage users, integrations, goals or Event Tracker actuals."}
                                   {selectedRole === "agency_client" && "Limited view of their one workspace: Dashboard, Neo AI, Marketing Calendar, Live Sales Feed, Event Tracker, Projections, Training Lab, Notifications."}
                                 </p>
                               </div>
 
-                              {(selectedRole === "agency_admin" || selectedRole === "agency_client") && user.role !== "owner" && (
+                              {(selectedRole === "agency_admin" || selectedRole === "team_member" || selectedRole === "agency_client") && user.role !== "owner" && (
                                 <div className="space-y-2">
                                   <Label>Agency</Label>
                                   <Select value={selectedAgency} onValueChange={(value) => { setSelectedAgency(value); setSelectedClients([]); }}>
@@ -713,7 +724,7 @@ export default function AdminPage() {
                                 </div>
                               )}
 
-                              {selectedRole === "agency_client" && selectedAgency && user.role !== "owner" && (
+                              {(selectedRole === "agency_client" || selectedRole === "team_member") && selectedAgency && user.role !== "owner" && (
                                 <div className="space-y-2">
                                   <Label>Assigned Clients</Label>
                                   <div className="grid gap-2 max-h-48 overflow-y-auto border rounded-md p-2">
@@ -742,7 +753,7 @@ export default function AdminPage() {
                               <Button 
                                 onClick={handleSaveRole} 
                                 className="w-full"
-                                disabled={updateRoleMutation.isPending || (user.role !== "owner" && !selectedAgency) || (selectedRole === "agency_client" && selectedClients.length !== 1)}
+                                disabled={updateRoleMutation.isPending || (user.role !== "owner" && !selectedAgency) || (selectedRole === "agency_client" && selectedClients.length !== 1) || (selectedRole === "team_member" && selectedClients.length === 0)}
                                 data-testid="button-save-role"
                               >
                                 {updateRoleMutation.isPending ? "Saving..." : "Save Changes"}

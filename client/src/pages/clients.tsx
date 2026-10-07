@@ -276,7 +276,7 @@ export default function ClientsPage() {
     <AppLayout title="Client Workspaces" mode="client" showSearch={true}>
       <div className="space-y-6">
         <div className="flex justify-between items-center">
-          <p className="text-muted-foreground">Open a client workspace or create a new one.</p>
+          <p className="text-muted-foreground">{canManageClients ? "Open a client workspace or create a new one." : "Open a client workspace."}</p>
           {canManageClients && (
             <Button onClick={() => setAddDialogOpen(true)} data-testid="button-add-client">
               <Plus className="mr-2 h-4 w-4" /> Add Client

@@ -62,6 +62,7 @@ function UserInfo() {
     : displayName.slice(0, 2).toUpperCase();
   
   const roleDisplay = user?.role === "owner" || user?.role === "agency_admin" ? "Admin"
+    : user?.role === "team_member" ? "Team Member"
     : user?.role === "agency_client" ? "Client"
     : "Disabled";
 

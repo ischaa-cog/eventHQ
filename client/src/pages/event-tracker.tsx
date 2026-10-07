@@ -283,6 +283,8 @@ export default function EventTrackerPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const canManageActuals = user?.role === "owner" || user?.role === "admin" || user?.role === "agency_admin";
+  // Event and masterclass notes are internal; the server also withholds them from clients.
+  const showInternalNotes = user?.role !== "agency_client";
   
   const [activeTab, setActiveTab] = useState("all");
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -1262,7 +1264,7 @@ export default function EventTrackerPage() {
                                   <TableHead className="text-gray-400 text-right">ROAS</TableHead>
                                   <TableHead className="text-gray-400 text-right">Cost / Attendee</TableHead>
                                   <TableHead className="text-gray-400 text-right">Cost / Ticket</TableHead>
-                                  <TableHead className="text-gray-400">Notes</TableHead>
+                                  {showInternalNotes && <TableHead className="text-gray-400">Notes</TableHead>}
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -1308,7 +1310,7 @@ export default function EventTrackerPage() {
                                         <TableCell className="text-right text-yellow-400">{metrics.roas === null ? "N/A" : `${metrics.roas.toFixed(2)}x`}</TableCell>
                                         <TableCell className="text-right text-gray-300">{metrics.costPerAttendee === null ? "N/A" : currency(metrics.costPerAttendee)}</TableCell>
                                         <TableCell className="text-right text-gray-300">{metrics.costPerTicket === null ? "N/A" : currency(metrics.costPerTicket)}</TableCell>
-                                        <TableCell className="min-w-[180px] whitespace-pre-wrap text-gray-400">{webinar.notes || "—"}</TableCell>
+                                        {showInternalNotes && <TableCell className="min-w-[180px] whitespace-pre-wrap text-gray-400">{webinar.notes || "—"}</TableCell>}
                                       </TableRow>
                                     );
                                   })}
@@ -1830,7 +1832,7 @@ export default function EventTrackerPage() {
                 </div>
               )}
 
-              {selectedEvent.notes && (
+              {showInternalNotes && selectedEvent.notes && (
                 <div>
                   <h3 className="text-white text-lg font-semibold mb-2">Notes</h3>
                   <p className="text-gray-400">{selectedEvent.notes}</p>

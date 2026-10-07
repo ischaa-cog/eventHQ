@@ -34,6 +34,12 @@ async function canAccessClient(user: User | undefined, clientId: number): Promis
   if (user.role === "agency_client" && user.clientAccess?.length) {
     return user.clientAccess.includes(clientId);
   }
+
+  // Team members can access the workspaces assigned to them within their agency.
+  if (user.role === "team_member" && user.agencyId && user.clientAccess?.includes(clientId)) {
+    const client = await storage.getClient(clientId);
+    return client?.agencyId === user.agencyId;
+  }
   
   return false;
 }
@@ -67,6 +73,11 @@ async function getEffectiveAgencyId(user: User | undefined): Promise<number | nu
   return null;
 }
 
+// Notes on events and masterclasses are internal team notes; clients never receive them.
+function withoutInternalNotes<T extends { notes?: string | null }>(user: User | undefined, row: T): T {
+  return user?.role === "agency_client" ? { ...row, notes: null } : row;
+}
+
 // Helper to send forbidden response
 function forbidden(res: Response) {
   return res.status(403).json({ error: "Forbidden" });
@@ -74,8 +85,9 @@ function forbidden(res: Response) {
 function isAdminUser(user: User | undefined) {
   return user?.role === "owner" || user?.role === "agency_admin";
 }
+// Staff who do day-to-day client work: admins plus team members.
 function isAgencyStaff(user: User | undefined) {
-  return isAdminUser(user);
+  return isAdminUser(user) || user?.role === "team_member";
 }
 const performanceProductSchema = z.object({
   id: z.string().optional(),
@@ -296,13 +308,13 @@ export function registerApiRoutes(app: Express): void {
         return res.status(403).json({ error: "Forbidden" });
       }
       const { role, agencyId, clientAccess } = req.body;
-      if (role !== "agency_admin" && role !== "agency_client") {
-        return res.status(400).json({ error: "Choose Admin or Client." });
+      if (!USER_ROLES.includes(role)) {
+        return res.status(400).json({ error: "Choose Admin, Team Member, or Client." });
       }
       const target = await storage.getUser(req.params.id);
       if (!target) return res.status(404).json({ error: "User not found" });
-      if (target.role === "owner" && role === "agency_client") {
-        return res.status(400).json({ error: "The primary admin cannot be changed to a client." });
+      if (target.role === "owner" && role !== "agency_admin") {
+        return res.status(400).json({ error: "The primary admin must stay an admin." });
       }
       const effectiveRole = target.role === "owner" ? "owner" : role;
       if (effectiveRole !== "owner" && (!Number.isSafeInteger(agencyId) || agencyId <= 0 || !await storage.getAgency(agencyId))) {
@@ -315,9 +327,20 @@ export function registerApiRoutes(app: Express): void {
           return res.status(400).json({ error: "Assign exactly one client in the selected agency." });
         }
       }
+      if (role === "team_member") {
+        if (!Array.isArray(clientAccess) || clientAccess.some(id => !Number.isSafeInteger(id) || id <= 0)) {
+          return res.status(400).json({ error: "Invalid client access list" });
+        }
+        for (const id of clientAccess) {
+          if ((await storage.getClient(id))?.agencyId !== agencyId) {
+            return res.status(400).json({ error: "Workspaces must belong to the chosen agency." });
+          }
+        }
+      }
+      // Admins reach every client in their agency, so they keep no assignment list.
       const user = await storage.updateUserRole(req.params.id, effectiveRole,
         effectiveRole === "owner" ? target.agencyId ?? undefined : agencyId,
-        role === "agency_client" ? clientAccess : undefined);
+        role === "agency_client" || role === "team_member" ? Array.from(new Set<number>(clientAccess)) : []);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -328,8 +351,8 @@ export function registerApiRoutes(app: Express): void {
     }
   });
 
-  // New accounts are Admin or Client only; legacy employee accounts stay disabled.
-  const USER_ROLES = ["agency_admin", "agency_client"] as const;
+  // New accounts are Admin, Team Member, or Client; legacy employee accounts stay disabled.
+  const USER_ROLES: readonly string[] = ["agency_admin", "team_member", "agency_client"];
   const loginEmailSchema = z.string().trim().toLowerCase().email("Enter a valid email address.").max(320);
 
   // Validates a new login; returns the normalized email or an error with its HTTP status.
@@ -375,7 +398,7 @@ export function registerApiRoutes(app: Express): void {
         lastName: typeof lastName === "string" && lastName.trim() ? lastName.trim() : null,
         role,
         agencyId: role === "owner" ? null : agencyId,
-        clientAccess: role === "owner" ? null : access,
+        clientAccess: role === "agency_admin" ? [] : Array.from(new Set(access)),
       }, password);
       res.status(201).json(user);
     } catch (error) {
@@ -657,6 +680,12 @@ export function registerApiRoutes(app: Express): void {
       // Clients see only their assigned workspace.
       if (user?.role === "agency_client" && user.clientAccess?.length) {
         const clients = await storage.getClientsByIds(user.clientAccess);
+        return res.json(stripHeadshotFromClients(clients));
+      }
+
+      // Team members see their assigned workspaces within their agency.
+      if (user?.role === "team_member" && user.agencyId && user.clientAccess?.length) {
+        const clients = (await storage.getClientsByIds(user.clientAccess)).filter(c => c.agencyId === user.agencyId);
         return res.json(stripHeadshotFromClients(clients));
       }
       
@@ -1491,7 +1520,7 @@ export function registerApiRoutes(app: Express): void {
         return forbidden(res);
       }
       const webinars = await storage.getWebinars(clientId);
-      res.json(webinars);
+      res.json(webinars.map(webinar => withoutInternalNotes(user, webinar)));
     } catch (error) {
       console.error("Error fetching webinars:", error);
       res.status(500).json({ error: "Failed to fetch masterclasses" });
@@ -1663,7 +1692,7 @@ export function registerApiRoutes(app: Express): void {
         return forbidden(res);
       }
       const events = await storage.getEventPerformances(clientId);
-      res.json(events);
+      res.json(events.map(event => withoutInternalNotes(user, event)));
     } catch (error: any) {
       console.error("Error fetching event performances:", error);
       res.status(500).json({ error: error.message || "Failed to fetch event performances" });
@@ -1684,7 +1713,7 @@ export function registerApiRoutes(app: Express): void {
       }
       // Get day stats for multi-day events
       const dayStats = await storage.getEventDayStats(id);
-      res.json({ ...event, dayStats });
+      res.json({ ...withoutInternalNotes(user, event), dayStats });
     } catch (error: any) {
       console.error("Error fetching event performance:", error);
       res.status(500).json({ error: error.message || "Failed to fetch event performance" });
@@ -2242,7 +2271,7 @@ export function registerApiRoutes(app: Express): void {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId, 10);
       
-      if (!isAdminUser(user)) {
+      if (!isAgencyStaff(user)) {
         return forbidden(res);
       }
       
@@ -2310,7 +2339,7 @@ export function registerApiRoutes(app: Express): void {
       const user = await getRequestUser(req);
       const entryId = parseInt(req.params.id, 10);
       
-      if (!isAdminUser(user)) {
+      if (!isAgencyStaff(user)) {
         return forbidden(res);
       }
       
@@ -2392,7 +2421,7 @@ export function registerApiRoutes(app: Express): void {
       const user = await getRequestUser(req);
       const entryId = parseInt(req.params.id, 10);
       
-      if (!isAdminUser(user)) {
+      if (!isAgencyStaff(user)) {
         return forbidden(res);
       }
       
@@ -2772,7 +2801,7 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
     try {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId);
-      if (!await canAccessClient(user, clientId)) return forbidden(res);
+      if (!isAdminUser(user) || !await canAccessClient(user, clientId)) return forbidden(res);
       if (!user) return forbidden(res);
 
       // Generate a nonce and bind it to the session so the callback can verify
@@ -2833,7 +2862,7 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
 
       // Enforce that the authenticated user still has access to this client
       const user = await getRequestUser(req);
-      if (!await canAccessClient(user, clientId)) {
+      if (!isAdminUser(user) || !await canAccessClient(user, clientId)) {
         return res.redirect("/?meta_ads_error=access_denied");
       }
 
@@ -2867,7 +2896,7 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
     try {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId);
-      if (!await canAccessClient(user, clientId)) return forbidden(res);
+      if (!isAdminUser(user) || !await canAccessClient(user, clientId)) return forbidden(res);
 
       await storage.clearClientMetaAds(clientId);
       res.json({ success: true });
