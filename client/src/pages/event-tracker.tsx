@@ -283,6 +283,8 @@ export default function EventTrackerPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const canManageActuals = user?.role === "owner" || user?.role === "admin" || user?.role === "agency_admin";
+  // Team members add and update events (products, upsells, results); delete and goals stay admin-only.
+  const canEditEvents = canManageActuals || user?.role === "team_member";
   // Event and masterclass notes are internal; the server also withholds them from clients.
   const showInternalNotes = user?.role !== "agency_client";
   
@@ -733,7 +735,7 @@ export default function EventTrackerPage() {
               <h1 className="text-2xl md:text-3xl font-bold text-white" data-testid="text-page-title">Event Tracker</h1>
               <p className="text-gray-400 mt-1 text-sm md:text-base">Track performance for masterclasses, challenges, and summits</p>
             </div>
-             {canManageActuals && <Button onClick={handleOpenNew} data-testid="button-add-event" className="w-full sm:w-auto">
+             {canEditEvents && <Button onClick={handleOpenNew} data-testid="button-add-event" className="w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />
               Add Event
              </Button>}
@@ -1156,7 +1158,7 @@ export default function EventTrackerPage() {
                               >
                                 <Eye className="h-4 w-4 text-gray-400 hover:text-white" />
                                 </Button>
-                               {canManageActuals && <Button 
+                               {canEditEvents && <Button 
                                 variant="ghost" 
                                 size="icon" 
                                 onClick={() => handleEdit(event)}

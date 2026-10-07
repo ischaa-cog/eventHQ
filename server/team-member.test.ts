@@ -110,9 +110,23 @@ test("team members work only in their assigned workspaces and cannot use admin a
     assert.equal((await request(member, `/api/clients/${assigned.id}/webhook-token`)).status, 403);
     assert.equal((await request(member, `/api/clients/${assigned.id}/meta-ads/authorize`)).status, 403);
     assert.equal((await request(member, `/api/clients/${assigned.id}/meta-ads`, "DELETE")).status, 403);
-    assert.equal((await request(member, `/api/clients/${assigned.id}/event-performance`, "POST", {
-      title: "Actuals", eventType: "challenge", startDate: "2026-10-01T00:00:00Z",
+    // Event Tracker: team members add events (with products and upsells) and update the numbers; delete stays admin-only.
+    const tracked = await request(member, `/api/clients/${assigned.id}/event-performance`, "POST", {
+      title: "Actuals", eventType: "challenge", startDate: "2026-10-01T00:00:00Z", totalRegistrants: 100,
+      salesData: [{ name: "VIP", price: 297, quantity: 3 }], upsellData: [{ name: "Workbook", price: 47, quantity: 2 }],
+    });
+    assert.equal(tracked.status, 201);
+    const updated = await request(member, `/api/event-performance/${tracked.body.id}`, "PATCH", {
+      totalRegistrants: 150, totalAttendees: 60, upsellData: [{ name: "Workbook", price: 47, quantity: 5 }],
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.totalRegistrants, 150);
+    assert.equal(updated.body.upsellData[0].quantity, 5);
+    assert.equal((await request(member, `/api/event-performance/${tracked.body.id}`, "DELETE")).status, 403);
+    assert.equal((await request(member, `/api/clients/${unassigned.id}/event-performance`, "POST", {
+      title: "Not mine", eventType: "challenge", startDate: "2026-10-01T00:00:00Z",
     })).status, 403);
+    assert.equal((await request(member, `/api/clients/${assigned.id}/event-goals`, "PATCH", { challengeGoal: 10 })).status, 403);
     assert.equal((await request(member, `/api/clients/${assigned.id}/active-status`, "PATCH", { isActive: false })).status, 403);
     assert.equal((await request(member, `/api/clients/${assigned.id}`, "DELETE")).status, 403);
     assert.equal((await request(member, "/api/users")).status, 403);

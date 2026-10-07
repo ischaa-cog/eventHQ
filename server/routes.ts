@@ -1724,7 +1724,8 @@ export function registerApiRoutes(app: Express): void {
     try {
       const user = await getRequestUser(req);
       const clientId = parseInt(req.params.clientId);
-      if (!isAdminUser(user) || !await canAccessClient(user, clientId)) {
+      // Team members record events and results; deleting events stays admin-only.
+      if (!isAgencyStaff(user) || !await canAccessClient(user, clientId)) {
         return forbidden(res);
       }
       
@@ -1775,7 +1776,7 @@ export function registerApiRoutes(app: Express): void {
       }
       
       const user = await getRequestUser(req);
-      if (!isAdminUser(user) || !await canAccessClient(user, existingEvent.clientId)) {
+      if (!isAgencyStaff(user) || !await canAccessClient(user, existingEvent.clientId)) {
         return forbidden(res);
       }
       
