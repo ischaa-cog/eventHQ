@@ -83,7 +83,8 @@ test("critical API workflows enforce tenant, role, metrics, and profile boundari
     await db.insert(users).values([
       { id: owner, role: "owner" },
       { id: adminA, role: "agency_admin", agencyId: agencyA.id },
-      { id: adminB, role: "agency_admin", agencyId: agencyB.id },
+      // Outsider staff with limited access: admins now have full access, so tenant checks use a team member.
+      { id: adminB, role: "team_member", agencyId: agencyB.id, clientAccess: [clientB.id] },
       { id: employeeA, role: "agency_employee", agencyId: agencyA.id, clientAccess: [clientA.id] },
       { id: clientUserA, role: "agency_client", agencyId: agencyA.id, clientAccess: [clientA.id] },
     ]);

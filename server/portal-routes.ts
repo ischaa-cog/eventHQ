@@ -6,6 +6,7 @@ import { db } from "./storage";
 import { getGoogleCalendarClient } from "./googleCalendar";
 import { netSaleContribution } from "./sales-math";
 import { BULK_TRAINING_MAX_ROWS } from "@shared/training-bulk";
+import { hasFullAccess } from "@shared/roles";
 import {
   trainingResources, trainingModules, trainingVideos, clientCalendarConnections, clients,
   salesSources, sales, calendarEntries, eventPerformance, projections,
@@ -97,11 +98,11 @@ export function registerPortalRoutes(
   // target workspace and stays inside the admin's tenant. Returns an error or the ids.
   const resolveVisibility = async (u: User, clientId: number, isGlobal: boolean | undefined, requested: number[] | undefined):
     Promise<{ status: number; error: string } | { ids: number[] }> => {
-    if (isGlobal && u.role !== "owner") return { status: 403, error: "Only the owner can publish shared resources" };
+    if (isGlobal && !hasFullAccess(u)) return { status: 403, error: "Only admins can publish shared resources" };
     if (isGlobal && requested?.length) return { status: 400, error: "Shared resources cannot have a client list" };
     const ids = isGlobal ? [] : requested || [];
     if (!isGlobal && !ids.includes(clientId)) return { status: 400, error: "Resource must include the target client" };
-    if (u.role !== "owner") for (const id of ids) if (!(await canAccessClient(u, id))) return { status: 403, error: "A resource cannot be assigned outside your tenant" };
+    if (!hasFullAccess(u)) for (const id of ids) if (!(await canAccessClient(u, id))) return { status: 403, error: "A resource cannot be assigned outside your tenant" };
     return { ids };
   };
   app.post("/api/clients/:id/training/resources", isAuthenticated, async (req: any, res) => {
@@ -149,16 +150,16 @@ export function registerPortalRoutes(
     const u = await getRequestUser(req); if (!admin(u) || !u) return fail(res, 403, "Admin access required");
     const existing = (await db.select().from(trainingResources).where(eq(trainingResources.id, idOf(req.params.id))))[0];
     if (!existing || existing.archived) return fail(res, 404, "Resource not found");
-    if (u.role !== "owner" && (existing.isGlobal || !(existing.visibleClientIds || []).length ||
+    if (!hasFullAccess(u) && (existing.isGlobal || !(existing.visibleClientIds || []).length ||
         !(await Promise.all((existing.visibleClientIds || []).map(id => canAccessClient(u, id)))).every(Boolean))) return fail(res, 403, "Shared resource is outside your tenant");
     const parsed = resourceInput.partial().safeParse(req.body); if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message);
-    if (parsed.data.isGlobal === true && u.role !== "owner") return fail(res, 403, "Only the owner can publish shared resources");
+    if (parsed.data.isGlobal === true && !hasFullAccess(u)) return fail(res, 403, "Only admins can publish shared resources");
     const nextGlobal = parsed.data.isGlobal ?? existing.isGlobal;
     const nextIds = parsed.data.visibleClientIds ?? existing.visibleClientIds;
     if (nextGlobal && nextIds.length) return fail(res, 400, "Shared resources cannot have a client list");
     if (!nextGlobal && !nextIds.length) return fail(res, 400, "At least one visible client is required");
     if (parsed.data.visibleClientIds) {
-      if (u.role !== "owner") for (const id of parsed.data.visibleClientIds) if (!(await canAccessClient(u, id))) return fail(res, 403, "A resource cannot be assigned outside your tenant");
+      if (!hasFullAccess(u)) for (const id of parsed.data.visibleClientIds) if (!(await canAccessClient(u, id))) return fail(res, 403, "A resource cannot be assigned outside your tenant");
     }
     try { const rows = await db.update(trainingResources).set({ ...parsed.data, updatedAt: new Date() }).where(eq(trainingResources.id, idOf(req.params.id))).returning(); res.json(rows[0]); } catch { fail(res, 400, "Failed to update resource"); }
   });
@@ -166,7 +167,7 @@ export function registerPortalRoutes(
     const u = await getRequestUser(req); if (!admin(u) || !u) return fail(res, 403, "Admin access required");
     const existing = (await db.select().from(trainingResources).where(eq(trainingResources.id, idOf(req.params.id))))[0];
     if (!existing || existing.archived) return fail(res, 404, "Resource not found");
-    if (u.role !== "owner" && (existing.isGlobal || !(existing.visibleClientIds || []).length ||
+    if (!hasFullAccess(u) && (existing.isGlobal || !(existing.visibleClientIds || []).length ||
         !(await Promise.all((existing.visibleClientIds || []).map(id => canAccessClient(u, id)))).every(Boolean))) return fail(res, 403, "Shared resource is outside your tenant");
     if (existing.seedKey) await db.update(trainingResources).set({ archived: true, updatedAt: new Date() }).where(eq(trainingResources.id, existing.id));
     else await db.delete(trainingResources).where(eq(trainingResources.id, existing.id));
@@ -213,7 +214,7 @@ export function registerPortalRoutes(
   });
   app.post("/api/clients/:id/calendar/sync", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
-    if ((await getRequestUser(req))?.role !== "owner") return fail(res, 403, "Only the owner can synchronize the shared Google Calendar connector");
+    if (!hasFullAccess(await getRequestUser(req))) return fail(res, 403, "Only admins can synchronize the shared Google Calendar connector");
     const connection = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId)))[0];
     if (!connection) return fail(res, 409, "Calendar is not configured");
     try {

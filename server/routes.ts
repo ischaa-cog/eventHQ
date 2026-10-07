@@ -14,6 +14,7 @@ import { sendNotificationEmail } from "./email";
 import { passwordProblem } from "./passwords";
 import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "./googleCalendar";
 import { registerPortalRoutes } from "./portal-routes";
+import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
 
 
@@ -21,8 +22,8 @@ import { netSaleContribution } from "./sales-math";
 async function canAccessClient(user: User | undefined, clientId: number): Promise<boolean> {
   if (!user) return false;
   
-  // Owner can access all clients
-  if (user.role === "owner") return true;
+  // Owner and admins (full access) can access all clients
+  if (hasFullAccess(user)) return true;
   
   // Agency admin can access clients in their agency
   if (user.role === "agency_admin" && user.agencyId) {
@@ -289,7 +290,7 @@ export function registerApiRoutes(app: Express): void {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "owner") {
+      if (!hasFullAccess(currentUser)) {
         return res.status(403).json({ error: "Forbidden" });
       }
       const users = await storage.getAllUsers();
@@ -304,7 +305,7 @@ export function registerApiRoutes(app: Express): void {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "owner") {
+      if (!hasFullAccess(currentUser)) {
         return res.status(403).json({ error: "Forbidden" });
       }
       const { role, agencyId, clientAccess } = req.body;
@@ -314,7 +315,7 @@ export function registerApiRoutes(app: Express): void {
       const target = await storage.getUser(req.params.id);
       if (!target) return res.status(404).json({ error: "User not found" });
       if (target.role === "owner" && role !== "agency_admin") {
-        return res.status(400).json({ error: "The primary admin must stay an admin." });
+        return res.status(400).json({ error: "The main admin account must stay an admin." });
       }
       const effectiveRole = target.role === "owner" ? "owner" : role;
       if (effectiveRole !== "owner" && (!Number.isSafeInteger(agencyId) || agencyId <= 0 || !await storage.getAgency(agencyId))) {
@@ -371,7 +372,7 @@ export function registerApiRoutes(app: Express): void {
   app.post("/api/users", isAuthenticated, async (req: any, res) => {
     try {
       const currentUser = await getRequestUser(req);
-      if (currentUser?.role !== "owner") return forbidden(res);
+      if (!hasFullAccess(currentUser)) return forbidden(res);
       const { email, password, role, agencyId, clientAccess, firstName, lastName } = req.body ?? {};
       if (!USER_ROLES.includes(role)) return res.status(400).json({ error: "Choose a valid role." });
       if (role !== "owner" && (!Number.isSafeInteger(agencyId) || !await storage.getAgency(agencyId))) {
@@ -410,7 +411,7 @@ export function registerApiRoutes(app: Express): void {
   app.patch("/api/users/:id/password", isAuthenticated, async (req: any, res) => {
     try {
       const currentUser = await getRequestUser(req);
-      if (currentUser?.role !== "owner") return forbidden(res);
+      if (!hasFullAccess(currentUser)) return forbidden(res);
       const problem = passwordProblem(req.body?.password);
       if (problem) return res.status(400).json({ error: problem });
       if (!await storage.getUser(req.params.id)) return res.status(404).json({ error: "User not found" });
@@ -425,14 +426,14 @@ export function registerApiRoutes(app: Express): void {
   app.delete("/api/users/:id", isAuthenticated, async (req: any, res) => {
     try {
       const currentUser = await getRequestUser(req);
-      if (currentUser?.role !== "owner") return forbidden(res);
+      if (!currentUser || !hasFullAccess(currentUser)) return forbidden(res);
       const target = await storage.getUser(req.params.id);
       if (!target) return res.status(404).json({ error: "User not found" });
       if (target.id === currentUser.id) {
         return res.status(400).json({ error: "You can't remove your own account." });
       }
       if (target.role === "owner" && (await storage.getAllUsers()).filter(u => u.role === "owner").length <= 1) {
-        return res.status(400).json({ error: "You can't remove the last owner." });
+        return res.status(400).json({ error: "You can't remove the main admin account." });
       }
       await storage.deleteUser(target.id);
       res.status(204).send();
@@ -538,7 +539,7 @@ export function registerApiRoutes(app: Express): void {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "owner") {
+      if (!hasFullAccess(currentUser)) {
         return res.status(403).json({ error: "Forbidden" });
       }
       const agencies = await storage.getAllAgencies();
@@ -556,7 +557,7 @@ export function registerApiRoutes(app: Express): void {
       const agencyId = parseInt(req.params.id);
       
       // Only owners or agency_admins of this agency can access
-      if (!currentUser || (currentUser.role !== "owner" && 
+      if (!currentUser || (!hasFullAccess(currentUser) && 
           !(currentUser.role === "agency_admin" && currentUser.agencyId === agencyId))) {
         return res.status(403).json({ error: "Forbidden" });
       }
@@ -578,7 +579,7 @@ export function registerApiRoutes(app: Express): void {
       const currentUser = await storage.getUser(userId);
       const agencyId = parseInt(req.params.id);
       
-      if (!currentUser || (currentUser.role !== "owner" && 
+      if (!currentUser || (!hasFullAccess(currentUser) && 
           !(currentUser.role === "agency_admin" && currentUser.agencyId === agencyId))) {
         return res.status(403).json({ error: "Forbidden" });
       }
@@ -601,7 +602,7 @@ export function registerApiRoutes(app: Express): void {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       
-      if (currentUser?.role !== "owner") {
+      if (!hasFullAccess(currentUser)) {
         return res.status(403).json({ error: "Forbidden - only owner can create agencies" });
       }
       
@@ -627,7 +628,7 @@ export function registerApiRoutes(app: Express): void {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       
-      if (currentUser?.role !== "owner") {
+      if (!hasFullAccess(currentUser)) {
         return res.status(403).json({ error: "Forbidden - only owner can delete agencies" });
       }
       
@@ -665,8 +666,8 @@ export function registerApiRoutes(app: Express): void {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
       
-      // Owner sees all clients from all agencies
-      if (user?.role === "owner") {
+      // Owner and admins (full access) see all clients from all agencies
+      if (hasFullAccess(user)) {
         const allClients = await storage.getAllClients();
         return res.json(stripHeadshotFromClients(allClients));
       }
@@ -2461,8 +2462,8 @@ export function registerApiRoutes(app: Express): void {
         return forbidden(res);
       }
       
-      // Owners can see all templates
-      if (user.role === "owner") {
+      // Full-access users can see all templates
+      if (hasFullAccess(user)) {
         const templates = await storage.getAllAssetTemplates();
         return res.json(templates);
       }
@@ -2490,8 +2491,8 @@ export function registerApiRoutes(app: Express): void {
       const { eventType } = req.params;
       const assetType = req.query.assetType as string | undefined;
       
-      // Owners can see all templates
-      if (user.role === "owner") {
+      // Full-access users can see all templates
+      if (hasFullAccess(user)) {
         const templates = await storage.getAllAssetTemplatesByType(eventType, assetType);
         return res.json(templates);
       }

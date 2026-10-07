@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { sortTrainingResources, vimeoPlayerUrl } from "@/lib/training-resources";
 import { BulkUploadDialog } from "@/components/training/BulkUploadDialog";
 import { useToast } from "@/hooks/use-toast";
+import { hasFullAccess } from "@shared/roles";
 import "./training-lab.css";
 
 type Category = "challenge" | "marketing" | "masterclass" | "bonus_training" | "webinar" | "summit" | "partner_sop";
@@ -45,7 +46,8 @@ export default function TrainingLabPage() {
   const clientId = params?.id;
   const { user } = useAuth();
   const qc = useQueryClient();
-  const isOwner = user?.role === "owner";
+  // Admins (and the original owner account) can share lessons with every client.
+  const isOwner = hasFullAccess(user);
   const canEdit = isOwner || user?.role === "agency_admin";
   const isClient = user?.role === "agency_client";
   const [previewMode, setPreviewMode] = useState(false);

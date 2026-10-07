@@ -60,7 +60,8 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
     await db.insert(users).values([
       { id: owner, role: "owner" },
       { id: adminA, role: "agency_admin", agencyId: a.id },
-      { id: adminB, role: "agency_admin", agencyId: b.id },
+      // Outsider staff with limited access: admins now have full access, so tenant checks use a team member.
+      { id: adminB, role: "team_member", agencyId: b.id, clientAccess: [cb.id] },
       { id: clientA, role: "agency_client", agencyId: a.id, clientAccess: [ca.id] },
       { id: clientB, role: "agency_client", agencyId: b.id, clientAccess: [cb.id] },
     ]);
@@ -79,17 +80,22 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
     const shared = await request(owner, `${pathA}/training/resources`, "POST", { ...resource, visibleClientIds: [ca.id, cb.id] });
     assert.equal(shared.status, 201);
     resourceIds.push(shared.body.id);
-    assert.equal((await request(adminA, `/api/training/resources/${shared.body.id}`, "PATCH", { title: "Changed" })).status, 403);
+    // Admins have full access (same as the owner), so they can edit lessons shared across clients.
+    assert.equal((await request(adminA, `/api/training/resources/${shared.body.id}`, "PATCH", { title: "Changed" })).status, 200);
     assert.equal((await request(adminB, `/api/training/resources/${shared.body.id}`, "DELETE")).status, 403);
      assert.ok((await request(clientB, `/api/clients/${cb.id}/training/resources`)).body.some((r: any) => r.id === shared.body.id));
-     assert.equal((await request(adminA, `${pathA}/training/resources`, "POST", { ...resource, isGlobal: true, visibleClientIds: [] })).status, 403);
+     const adminGlobal = await request(adminA, `${pathA}/training/resources`, "POST", { ...resource, title: "Admin shared", isGlobal: true, visibleClientIds: [] });
+     assert.equal(adminGlobal.status, 201);
+     resourceIds.push(adminGlobal.body.id);
+     assert.equal((await request(adminB, `${pathA}/training/resources`, "POST", { ...resource, isGlobal: true, visibleClientIds: [] })).status, 403);
      const global = await request(owner, `${pathA}/training/resources`, "POST", { ...resource, title: "All clients", isGlobal: true });
      assert.equal(global.status, 201);
      resourceIds.push(global.body.id);
      assert.equal(global.body.isGlobal, true);
-     assert.equal((await request(adminA, `/api/training/resources/${global.body.id}`, "PATCH", { title: "Hijacked" })).status, 403);
-     assert.equal((await request(adminA, `/api/training/resources/${global.body.id}`, "DELETE")).status, 403);
-     assert.equal((await request(adminA, `/api/training/resources/${added.body.id}`, "PATCH", { isGlobal: true, visibleClientIds: [] })).status, 403);
+     assert.equal((await request(adminA, `/api/training/resources/${global.body.id}`, "PATCH", { title: "All clients" })).status, 200);
+     assert.equal((await request(adminB, `/api/training/resources/${global.body.id}`, "PATCH", { title: "Hijacked" })).status, 403);
+     assert.equal((await request(adminB, `/api/training/resources/${global.body.id}`, "DELETE")).status, 403);
+     assert.equal((await request(adminB, `/api/training/resources/${added.body.id}`, "PATCH", { isGlobal: true, visibleClientIds: [] })).status, 403);
      assert.equal((await request(clientB, `/api/clients/${cb.id}/training/resources`)).body.some((r: any) => r.id === global.body.id), true);
      const [futureClient] = await db.insert(clients).values({ agencyId: b.id, name: `portal-test-future-${marker}` }).returning();
      createdClients.push(futureClient.id);
@@ -108,8 +114,7 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
     const bulkPath = `${pathA}/training/resources/bulk`;
     assert.equal((await request(clientA, bulkPath, "POST", { resources: bulkRows })).status, 403);
     assert.equal((await request(adminB, bulkPath, "POST", { resources: bulkRows })).status, 403);
-    assert.equal((await request(adminA, bulkPath, "POST", { resources: bulkRows, isGlobal: true })).status, 403);
-    assert.equal((await request(adminA, bulkPath, "POST", { resources: bulkRows, visibleClientIds: [ca.id, cb.id] })).status, 403);
+    assert.equal((await request(adminB, bulkPath, "POST", { resources: bulkRows, isGlobal: true })).status, 403);
     const badBulk = await request(adminA, bulkPath, "POST", { resources: [...bulkRows, { title: `Bulk bad ${marker}`, url: "not-a-url", category: "marketing", resourceType: "video" }] });
     assert.equal(badBulk.status, 400);
     assert.match(badBulk.body.error, /^Row 3:/);
@@ -141,7 +146,7 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
     assert.equal(connection.body.connected, false);
     if (process.env.REPLIT_CONNECTORS_HOSTNAME) assert.ok(connection.body.error);
     else assert.equal(connection.body.error, null);
-    assert.equal((await request(adminA, `${pathA}/calendar/sync`, "POST")).status, 403);
+    assert.equal((await request(adminB, `${pathA}/calendar/sync`, "POST")).status, 403);
     assert.equal((await request(owner, `${pathA}/calendar/connection`, "PATCH", { calendarId: null })).status, 200);
 
     const transactions = [

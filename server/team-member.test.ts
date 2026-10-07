@@ -175,3 +175,13 @@ test("team members work only in their assigned workspaces and cannot use admin a
     if (agencyIds.length) await db.delete(agencies).where(inArray(agencies.id, agencyIds));
   }
 });
+
+test("admins have the same full access as the owner, except the shared demo admin", async () => {
+  const { hasFullAccess } = await import("@shared/roles");
+  assert.equal(hasFullAccess({ id: "u1", role: "owner" }), true);
+  assert.equal(hasFullAccess({ id: "u2", role: "agency_admin" }), true);
+  assert.equal(hasFullAccess({ id: "demo-client:sample-admin", role: "agency_admin" }), false);
+  assert.equal(hasFullAccess({ id: "u3", role: "team_member" }), false);
+  assert.equal(hasFullAccess({ id: "u4", role: "agency_client" }), false);
+  assert.equal(hasFullAccess(undefined), false);
+});

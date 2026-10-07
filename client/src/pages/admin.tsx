@@ -17,6 +17,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import type { User, AssetTemplate } from "@shared/schema";
+import { hasFullAccess } from "@shared/roles";
 import { clientLoginUrl, generatePassword, LoginDetailsDialog, PasswordField, staffLoginUrl, type LoginDetails } from "@/components/LoginDetails";
 
 interface Agency {
@@ -33,6 +34,8 @@ interface Client {
 
 export default function AdminPage() {
   const { user: currentUser } = useAuth();
+  // Admins and the original owner account have the same full access.
+  const fullAccess = hasFullAccess(currentUser);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -87,22 +90,22 @@ export default function AdminPage() {
 
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
-    enabled: currentUser?.role === "owner",
+    enabled: fullAccess,
   });
 
   const { data: agencies = [] } = useQuery<Agency[]>({
     queryKey: ["/api/agencies"],
-    enabled: currentUser?.role === "owner",
+    enabled: fullAccess,
   });
 
   const { data: clients = [] } = useQuery<Client[]>({
     queryKey: ["/api/clients"],
-    enabled: currentUser?.role === "owner",
+    enabled: fullAccess,
   });
 
   const { data: templates = [] } = useQuery<AssetTemplate[]>({
     queryKey: ["/api/asset-templates"],
-    enabled: currentUser?.role === "owner" || currentUser?.role === "agency_admin",
+    enabled: fullAccess || currentUser?.role === "agency_admin",
   });
 
   const createTemplateMutation = useMutation({
@@ -393,13 +396,13 @@ export default function AdminPage() {
           <div className="overflow-x-auto mb-8 -mx-1 px-1">
             <TabsList className="inline-flex min-w-full h-auto flex-wrap gap-1 bg-card border border-border p-1">
               <TabsTrigger value="agency" className="flex-1 min-w-[120px]" data-testid="tab-agency">Agency Profile</TabsTrigger>
-              {currentUser?.role === "owner" && (
+              {fullAccess && (
                 <TabsTrigger value="agencies" className="flex-1 min-w-[100px]" data-testid="tab-agencies">
                   <Building2 className="mr-2 h-4 w-4" />
                   Agencies
                 </TabsTrigger>
               )}
-              {currentUser?.role === "owner" && (
+              {fullAccess && (
                 <TabsTrigger value="users" className="flex-1 min-w-[80px]" data-testid="tab-users">
                   <Users className="mr-2 h-4 w-4" />
                   Users
@@ -409,7 +412,7 @@ export default function AdminPage() {
             </TabsList>
           </div>
 
-          {currentUser?.role === "owner" && (
+          {fullAccess && (
             <TabsContent value="agencies" className="space-y-6">
               <div className="flex justify-between items-center">
                 <div>
@@ -530,7 +533,7 @@ export default function AdminPage() {
             </TabsContent>
           )}
 
-          {currentUser?.role === "owner" && (
+          {fullAccess && (
             <TabsContent value="users" className="space-y-6">
               <div className="flex justify-between items-center">
                 <div>
@@ -700,7 +703,7 @@ export default function AdminPage() {
                                   </SelectContent>
                                 </Select>
                                 <p className="text-xs text-muted-foreground">
-                                  {selectedRole === "agency_admin" && "Can manage an agency and its clients."}
+                                  {selectedRole === "agency_admin" && "Full access: all clients, users, training, integrations and settings."}
                                   {selectedRole === "team_member" && "Works in their assigned workspaces: events, assets, content, calendar entries and client details. Can't manage users, integrations, goals or Event Tracker actuals."}
                                   {selectedRole === "agency_client" && "Limited view of their one workspace: Dashboard, Neo AI, Marketing Calendar, Live Sales Feed, Event Tracker, Projections, Training Lab, Notifications."}
                                 </p>
