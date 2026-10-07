@@ -21,11 +21,11 @@ type Resource = { id: number | string; title: string; description?: string | nul
 type Form = { title: string; description: string; category: Category; resourceType: "video" | "document"; url: string; orderIndex: number; visibleClientIds: number[]; isGlobal: boolean };
 
 const categories: { id: Category; label: string; detail: string; eyebrow: string; mark: string }[] = [
-  { id: "challenge", label: "Five-Day Challenges", detail: "Plan and run a successful challenge.", eyebrow: "01", mark: "5D" },
-  { id: "marketing", label: "Marketing", detail: "Podcast and social media training.", eyebrow: "02", mark: "M" },
-  { id: "masterclass", label: "Masterclass", detail: "Masterclass training and resources.", eyebrow: "03", mark: "MC" },
-  { id: "bonus_training", label: "Bonus Training", detail: "Additional lessons and speaker training.", eyebrow: "04", mark: "+" },
-  { id: "summit", label: "Summits", detail: "Summit training and resources.", eyebrow: "05", mark: "—" },
+  { id: "marketing", label: "Marketing", detail: "Podcast and social media training.", eyebrow: "01", mark: "M" },
+  { id: "masterclass", label: "Masterclass", detail: "Masterclass training and resources.", eyebrow: "02", mark: "MC" },
+  { id: "summit", label: "Summits", detail: "Summit training and resources.", eyebrow: "03", mark: "—" },
+  { id: "challenge", label: "Five-Day Challenges", detail: "Plan and run a successful challenge.", eyebrow: "04", mark: "5D" },
+  { id: "bonus_training", label: "Bonus Training", detail: "Additional lessons and speaker training.", eyebrow: "05", mark: "+" },
   { id: "partner_sop", label: "Partner SOPs", detail: "Partner processes and training.", eyebrow: "06", mark: "—" },
 ];
 
@@ -43,13 +43,13 @@ export default function TrainingLabPage() {
   const canEdit = isOwner || user?.role === "agency_admin";
   const isClient = user?.role === "agency_client";
   const [previewMode, setPreviewMode] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<Category>("challenge");
+  const [activeCategory, setActiveCategory] = useState<Category>("marketing");
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Resource | null>(null);
   const [form, setForm] = useState<Form>({
-    title: "", description: "", category: "challenge", resourceType: "video", url: "", orderIndex: 0,
+    title: "", description: "", category: "marketing", resourceType: "video", url: "", orderIndex: 0,
     visibleClientIds: clientId ? [Number(clientId)] : [], isGlobal: false,
   });
 
@@ -69,7 +69,7 @@ export default function TrainingLabPage() {
   const preview = canEdit && previewMode;
   const readOnly = isClient || preview;
 
-  const emptyForm = (category: Category = "challenge"): Form => ({
+  const emptyForm = (category: Category = "marketing"): Form => ({
     title: "", description: "", category, resourceType: "video", url: "", orderIndex: 0,
     visibleClientIds: clientId ? [Number(clientId)] : [], isGlobal: false,
   });
@@ -102,7 +102,7 @@ export default function TrainingLabPage() {
       title: item.title, description: item.description || "", category: item.category,
       resourceType: item.resourceType, url: item.url, orderIndex: item.orderIndex || 0,
       visibleClientIds: item.visibleClientIds || [], isGlobal: !!item.isGlobal,
-    } : { ...emptyForm(category), orderIndex: list.filter(resource => inCategory(resource, category ?? "challenge")).length * 10 });
+    } : { ...emptyForm(category), orderIndex: list.filter(resource => inCategory(resource, category ?? "marketing")).length * 10 });
     save.reset();
     setDialogOpen(true);
   };
@@ -136,7 +136,7 @@ export default function TrainingLabPage() {
             <h1 id="training-title">Learn the workflow.<br /><em>Run the room.</em></h1>
             <p>A calm place to get oriented, find the right lesson, and keep your event moving forward.</p>
           </div>
-          <div className="training-intro-note"><span className="training-note-line" /><span>Start with <strong>Five-Day Challenges</strong><br />if you’re new here.</span></div>
+          <div className="training-intro-note"><span className="training-note-line" /><span>Pick the training for<br />the event you’re running next.</span></div>
         </section>
 
         {resources.isLoading && <p className="training-status" role="status">Loading training resources…</p>}
@@ -177,7 +177,7 @@ export default function TrainingLabPage() {
                         <span className="training-lesson-num">{String(index + 1).padStart(2, "0")}</span>
                         <span className="training-play-dot" aria-hidden="true">{isSelected ? <Play size={11} fill="currentColor" /> : <span />}</span>
                         <span className="training-lesson-name">{resource.title}</span>
-                        {resource.isGlobal && <Badge variant="secondary">Shared</Badge>}
+                        {resource.isGlobal && !readOnly && <Badge variant="secondary">Shared</Badge>}
                         {isSelected && <Check size={15} className="training-check" aria-label="Selected" />}
                       </button>
                       {canManage(resource) && <div className="training-item-actions">
@@ -200,7 +200,7 @@ export default function TrainingLabPage() {
                   {player ? <div className="training-video"><iframe key={player} src={player} title={selected.title} loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" /></div> :
                     <div className="training-resource-open"><div className="training-open-icon">{selected.resourceType === "document" ? "DOC" : <Play size={22} />}</div><p>{selected.resourceType === "document" ? "Open this lesson document in a new tab." : "This video link is hosted outside Vimeo."}</p><Button variant="outline" asChild><a href={selected.url} target="_blank" rel="noopener noreferrer">Open {selected.resourceType}<ExternalLink size={15} /></a></Button></div>}
                   <div className="training-player-meta">
-                    <div><div className="training-kicker">SELECTED RESOURCE{selected.isGlobal ? " / SHARED" : ""}</div><h3>{selected.title}</h3>{selected.description && <p>{selected.description}</p>}</div>
+                    <div><div className="training-kicker">SELECTED RESOURCE{selected.isGlobal && !readOnly ? " / SHARED" : ""}</div><h3>{selected.title}</h3>{selected.description && <p>{selected.description}</p>}</div>
                     <div className="training-duration">{selected.resourceType === "video" ? "Watch at your pace" : "Read at your pace"}</div>
                   </div>
                 </article>
