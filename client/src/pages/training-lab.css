@@ -736,3 +736,13 @@
     font-size: 11px;
   }
 }
+.training-category-locked {
+  opacity: .62;
+  cursor: not-allowed;
+  background: #f1f5f4;
+}
+
+.training-category-locked:hover {
+  transform: none;
+  border-color: #d7e5e5;
+}

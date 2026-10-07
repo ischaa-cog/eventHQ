@@ -7,10 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ArrowRight, Check, ChevronRight, ChevronUp, ChevronDown, ExternalLink, Pencil, Play, Plus, Search, Trash2, Upload } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, ChevronUp, ChevronDown, ExternalLink, Lock, Pencil, Play, Plus, Search, Trash2, Upload } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRoute } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { sortTrainingResources, vimeoPlayerUrl } from "@/lib/training-resources";
@@ -22,13 +22,14 @@ type Category = "challenge" | "marketing" | "masterclass" | "bonus_training" | "
 type Resource = { id: number | string; title: string; description?: string | null; category: Category; resourceType: "video" | "document"; url: string; orderIndex: number; visibleClientIds?: number[]; isGlobal?: boolean; legacy?: boolean };
 type Form = { title: string; description: string; category: Category; resourceType: "video" | "document"; url: string; orderIndex: number; visibleClientIds: number[]; isGlobal: boolean };
 
-const categories: { id: Category; label: string; detail: string; eyebrow: string; mark: string }[] = [
+// comingSoon categories are locked for clients; admins can still open them to prepare lessons.
+const categories: { id: Category; label: string; detail: string; eyebrow: string; mark: string; comingSoon?: boolean }[] = [
   { id: "marketing", label: "Marketing", detail: "Podcast and social media training.", eyebrow: "01", mark: "M" },
   { id: "masterclass", label: "Masterclass", detail: "Masterclass training and resources.", eyebrow: "02", mark: "MC" },
-  { id: "summit", label: "Summits", detail: "Summit training and resources.", eyebrow: "03", mark: "—" },
+  { id: "summit", label: "Summits", detail: "Summit training and resources.", eyebrow: "03", mark: "—", comingSoon: true },
   { id: "challenge", label: "Five-Day Challenges", detail: "Plan and run a successful challenge.", eyebrow: "04", mark: "5D" },
   { id: "bonus_training", label: "Bonus Training", detail: "Additional lessons and speaker training.", eyebrow: "05", mark: "+" },
-  { id: "partner_sop", label: "Partner SOPs", detail: "Partner processes and training.", eyebrow: "06", mark: "—" },
+  { id: "partner_sop", label: "Partner SOPs", detail: "Partner processes and training.", eyebrow: "06", mark: "—", comingSoon: true },
 ];
 
 const inCategory = (item: Resource, category: Category) =>
@@ -75,6 +76,10 @@ export default function TrainingLabPage() {
   const player = selected?.resourceType === "video" ? vimeoPlayerUrl(selected.url) : null;
   const preview = canEdit && previewMode;
   const readOnly = isClient || preview;
+  // If a client (or the client preview) is on a locked category, move to the first open one.
+  useEffect(() => {
+    if (readOnly && selectedCategory.comingSoon) setActiveCategory(categories.find(category => !category.comingSoon)!.id);
+  }, [readOnly, activeCategory]);
 
   // New lessons default to every client: the owner shares with all (including future clients);
   // an agency admin gets all of their clients ticked. Either can narrow it down before saving.
@@ -160,10 +165,16 @@ export default function TrainingLabPage() {
             {categories.map(category => {
                const count = list.filter(resource => inCategory(resource, category.id)).length;
               const active = activeCategory === category.id;
+              const locked = !!category.comingSoon && readOnly;
+              if (locked) return <div key={category.id} className={`training-category training-category-locked training-mark-${category.id}`} aria-disabled="true" aria-label={`${category.label}: coming soon`}>
+                <span className="training-cat-top"><span>{category.eyebrow}</span></span>
+                <span className="training-category-mark" aria-hidden="true"><Lock size={14} /></span>
+                <span className="training-cat-copy"><strong>{category.label}</strong><small>Coming soon</small></span>
+              </div>;
               return <button key={category.id} type="button" className={`training-category training-mark-${category.id}${active ? " training-category-active" : ""}${count === 0 ? " training-category-empty" : ""}`} aria-pressed={active} onClick={() => chooseCategory(category.id)}>
                 <span className="training-cat-top"><span>{category.eyebrow}</span>{count > 0 && <b>{count}</b>}</span>
-                <span className="training-category-mark" aria-hidden="true">{category.mark}</span>
-                <span className="training-cat-copy"><strong>{category.label}</strong><small>{count ? `${count} lesson${count === 1 ? "" : "s"}` : "No resources yet"}</small></span>
+                <span className="training-category-mark" aria-hidden="true">{category.comingSoon ? <Lock size={14} /> : category.mark}</span>
+                <span className="training-cat-copy"><strong>{category.label}</strong><small>{category.comingSoon ? "Coming soon for clients" : count ? `${count} lesson${count === 1 ? "" : "s"}` : "No resources yet"}</small></span>
                 {active && <ArrowRight size={16} className="training-cat-arrow" aria-hidden="true" />}
               </button>;
             })}
