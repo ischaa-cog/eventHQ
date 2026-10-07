@@ -34,6 +34,9 @@ const categories: { id: Category; label: string; detail: string; eyebrow: string
 const inCategory = (item: Resource, category: Category) =>
   item.category === category || (category === "masterclass" && item.category === "webinar");
 
+// Whop course lessons are members-only and can't play inside EventHQ; they open on Whop instead.
+const isWhopLink = (url: string) => { try { return /(^|\.)whop\.com$/i.test(new URL(url).hostname); } catch { return false; } };
+
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Something went wrong. Please try again.";
 
 export default function TrainingLabPage() {
@@ -189,6 +192,7 @@ export default function TrainingLabPage() {
                         <span className="training-play-dot" aria-hidden="true">{isSelected ? <Play size={11} fill="currentColor" /> : <span />}</span>
                         <span className="training-lesson-name">{resource.title}</span>
                         {resource.isGlobal && !readOnly && <Badge variant="secondary">Shared</Badge>}
+                        {!readOnly && canEdit && resource.resourceType === "video" && !vimeoPlayerUrl(resource.url) && <Badge variant="outline" className="border-rose-500/60 text-rose-600" title="This video can't play inside EventHQ. Re-host it on Vimeo and update the link.">{isWhopLink(resource.url) ? "Whop: not playable here" : "Not playable here"}</Badge>}
                         {!resource.isGlobal && !resource.legacy && !readOnly && canEdit && <Badge variant="outline" className="max-w-40 truncate border-amber-500/60 text-amber-600" title={`Only visible to: ${clientNames(resource.visibleClientIds)}`}>Only: {clientNames(resource.visibleClientIds)}</Badge>}
                         {isSelected && <Check size={15} className="training-check" aria-label="Selected" />}
                       </button>
@@ -210,7 +214,7 @@ export default function TrainingLabPage() {
                 <article className="training-player-card">
                   <div className="training-player-label"><span className="training-live-dot" />Selected lesson</div>
                   {player ? <div className="training-video"><iframe key={player} src={player} title={selected.title} loading="lazy" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" /></div> :
-                    <div className="training-resource-open"><div className="training-open-icon">{selected.resourceType === "document" ? "DOC" : <Play size={22} />}</div><p>{selected.resourceType === "document" ? "Open this lesson document in a new tab." : "This video link is hosted outside Vimeo."}</p><Button variant="outline" asChild><a href={selected.url} target="_blank" rel="noopener noreferrer">Open {selected.resourceType}<ExternalLink size={15} /></a></Button></div>}
+                    <div className="training-resource-open"><div className="training-open-icon">{selected.resourceType === "document" ? "DOC" : <Play size={22} />}</div><p>{selected.resourceType === "document" ? "Open this lesson document in a new tab." : isWhopLink(selected.url) ? "This lesson is hosted on Whop and opens there. You'll need to sign in with your Whop account." : "This video opens in a new tab."}</p><Button variant="outline" asChild><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.resourceType === "video" && isWhopLink(selected.url) ? "Watch on Whop" : `Open ${selected.resourceType}`}<ExternalLink size={15} /></a></Button></div>}
                   <div className="training-player-meta">
                     <div><div className="training-kicker">SELECTED RESOURCE{selected.isGlobal && !readOnly ? " / SHARED" : ""}</div><h3>{selected.title}</h3>{selected.description && <p>{selected.description}</p>}</div>
                     <div className="training-duration">{selected.resourceType === "video" ? "Watch at your pace" : "Read at your pace"}</div>
