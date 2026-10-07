@@ -36,7 +36,8 @@ export default function MarketingCalendarPage() {
   const clientId = params.id;
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [view, setView] = useState<"list" | "calendar" | "week" | "google">("google");
+  const [view, setView] = useState<"list" | "calendar" | "week" | "google">("calendar");
+  const [viewChosen, setViewChosen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<CalendarEntry | null>(null);
@@ -74,6 +75,10 @@ export default function MarketingCalendarPage() {
   const connection = rawConnection as { calendarId: string | null; lastSuccessfulSync: string | null; error: string | null; connected: boolean } | undefined;
   useEffect(() => { if (connection) setCalendarId(connection.calendarId || ""); }, [connection?.calendarId]);
   const googleCalendarId = connection?.calendarId || null;
+  // Open on the linked Google Calendar when there is one; otherwise on the month view of this workspace's entries.
+  useEffect(() => {
+    if (googleCalendarId && !viewChosen) setView("google");
+  }, [googleCalendarId]);
   const googleEmbedUrl = googleCalendarId
     ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(googleCalendarId)}&ctz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}&mode=MONTH&showPrint=0&showTitle=0`
     : null;
@@ -327,7 +332,7 @@ export default function MarketingCalendarPage() {
 
         <div className="flex items-center justify-end">
           <div className="flex items-center gap-4">
-            <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
+            <Tabs value={view} onValueChange={(v) => { setView(v as typeof view); setViewChosen(true); }}>
               <TabsList>
                 <TabsTrigger value="google" data-testid="view-google">
                   <Calendar className="h-4 w-4 mr-2" />

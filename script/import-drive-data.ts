@@ -6,7 +6,7 @@
 // <data-dir>/roster.json:
 //   { "sharedTraining": [{ "seedKey", "title", "description", "category", "resourceType", "url" }],
 //     "clients": [{ "key", "name", "aliases"?: [...], "businessName", "active", "website"?, "headshot"?,
-//                   "profile": { "niche"?, "primaryOffer"?, "brandVoiceDos"?, "styleGuide"? },
+//                   "profile": { "fullName"?, "email"?, "niche"?, "primaryOffer"?, "brandVoiceDos"?, "styleGuide"? },
 //                   "calendar": [{ "title", "start": "<ISO 8601 with offset>", "link"? }],
 //                   "vault": [{ "name", "fileType", "content"?, "url"? }] }] }
 // "headshot" is an image path relative to <data-dir>.
@@ -22,7 +22,7 @@ type CalendarItem = { title: string; start: string; link?: string };
 type VaultItem = { name: string; fileType: string; content?: string; url?: string };
 type RosterClient = {
   key: string; name: string; aliases?: string[]; businessName?: string; active: boolean; website?: string; headshot?: string;
-  profile?: { niche?: string; primaryOffer?: string; brandVoiceDos?: string; styleGuide?: string };
+  profile?: { fullName?: string; email?: string; niche?: string; primaryOffer?: string; brandVoiceDos?: string; styleGuide?: string };
   calendar?: CalendarItem[]; vault?: VaultItem[];
 };
 type SharedTraining = { seedKey: string; title: string; description?: string; category: string; resourceType: "video" | "document"; url: string };
