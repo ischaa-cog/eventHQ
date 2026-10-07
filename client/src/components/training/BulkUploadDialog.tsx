@@ -20,6 +20,7 @@ type Props = {
   clientId: string;
   isOwner: boolean;
   clients: { id: number; name: string }[];
+  allClientIds: number[];
   defaultCategory: TrainingCategory;
   onImported: (count: number) => void;
 };
@@ -30,7 +31,7 @@ const errorMessage = (error: unknown) => {
   try { return JSON.parse(body).error || body; } catch { return body; }
 };
 
-export function BulkUploadDialog({ open, onOpenChange, clientId, isOwner, clients, defaultCategory, onImported }: Props) {
+export function BulkUploadDialog({ open, onOpenChange, clientId, isOwner, clients, allClientIds, defaultCategory, onImported }: Props) {
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState("");
   const [isGlobal, setIsGlobal] = useState(false);
@@ -51,7 +52,8 @@ export function BulkUploadDialog({ open, onOpenChange, clientId, isOwner, client
   // Start fresh each time the dialog opens.
   useEffect(() => {
     if (!open) return;
-    setText(""); setFileName(""); setIsGlobal(false); setVisibleClientIds([Number(clientId)]);
+    // Default to every client, the same as Add lesson; the admin can narrow it down.
+    setText(""); setFileName(""); setIsGlobal(isOwner); setVisibleClientIds(isOwner ? [] : allClientIds);
     upload.reset();
   }, [open, clientId]);
 

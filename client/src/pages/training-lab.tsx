@@ -73,10 +73,14 @@ export default function TrainingLabPage() {
   const preview = canEdit && previewMode;
   const readOnly = isClient || preview;
 
+  // New lessons default to every client: the owner shares with all (including future clients);
+  // an agency admin gets all of their clients ticked. Either can narrow it down before saving.
+  const allClientIds = () => Array.from(new Set([...(clients.data || []).map(client => client.id), ...(clientId ? [Number(clientId)] : [])]));
   const emptyForm = (category: Category = "marketing"): Form => ({
     title: "", description: "", category, resourceType: "video", url: "", orderIndex: 0,
-    visibleClientIds: clientId ? [Number(clientId)] : [], isGlobal: false,
+    visibleClientIds: isOwner ? [] : allClientIds(), isGlobal: isOwner,
   });
+  const clientNames = (ids: number[] = []) => ids.map(id => clients.data?.find(client => client.id === id)?.name || `Client ${id}`).join(", ");
   const save = useMutation({
     mutationFn: async (data: Form) => {
       const response = editing
@@ -185,6 +189,7 @@ export default function TrainingLabPage() {
                         <span className="training-play-dot" aria-hidden="true">{isSelected ? <Play size={11} fill="currentColor" /> : <span />}</span>
                         <span className="training-lesson-name">{resource.title}</span>
                         {resource.isGlobal && !readOnly && <Badge variant="secondary">Shared</Badge>}
+                        {!resource.isGlobal && !resource.legacy && !readOnly && canEdit && <Badge variant="outline" className="max-w-40 truncate border-amber-500/60 text-amber-600" title={`Only visible to: ${clientNames(resource.visibleClientIds)}`}>Only: {clientNames(resource.visibleClientIds)}</Badge>}
                         {isSelected && <Check size={15} className="training-check" aria-label="Selected" />}
                       </button>
                       {canManage(resource) && <div className="training-item-actions">
@@ -238,7 +243,7 @@ export default function TrainingLabPage() {
         </DialogContent>
       </Dialog>
       {canEdit && clientId && <BulkUploadDialog open={bulkOpen} onOpenChange={setBulkOpen} clientId={clientId} isOwner={isOwner}
-        clients={clients.data || []} defaultCategory={activeCategory === "webinar" ? "masterclass" : activeCategory}
+        clients={clients.data || []} allClientIds={allClientIds()} defaultCategory={activeCategory === "webinar" ? "masterclass" : activeCategory}
         onImported={count => { qc.invalidateQueries({ queryKey }); toast({ title: `${count} lesson${count === 1 ? "" : "s"} added` }); }} />}
     </div>
   </AppLayout>;
