@@ -11,7 +11,7 @@ import { BULK_TRAINING_TEMPLATE, parseTrainingCsv, type TrainingCategory } from 
 
 const CATEGORY_LABELS: Record<TrainingCategory, string> = {
   marketing: "Marketing", masterclass: "Masterclass", summit: "Summits",
-  challenge: "Five-Day Challenges", bonus_training: "Bonus Training", partner_sop: "Partner SOPs",
+  challenge: "Five-Day Challenges", bonus_training: "Bonus Training", partner_sop: "Partner SOPs", inner_circle: "Neo's Inner Circle",
 };
 
 type Props = {

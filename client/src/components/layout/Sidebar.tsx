@@ -19,6 +19,7 @@ import {
   Settings,
   Image,
   WandSparkles,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -251,6 +252,7 @@ export function Sidebar({ mode = "agency" }: SidebarProps) {
     ...(user?.role === "owner" || user?.role === "agency_admin"
       ? [
           { name: "Send Notifications", href: "/send-notifications", icon: Send },
+          { name: "Neo Knowledge", href: "/neo-knowledge", icon: BookOpen },
           { name: "Admin Settings", href: "/admin", icon: Settings },
         ]
       : []),

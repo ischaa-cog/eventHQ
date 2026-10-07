@@ -208,6 +208,7 @@
 .training-mark-marketing .training-category-mark { background: #e2edfa; color: #567ea8; }
 .training-mark-masterclass .training-category-mark { background: #eee6f5; color: #80659a; }
 .training-mark-bonus_training .training-category-mark { background: #eaf1d8; color: #6f8247; }
+.training-mark-inner_circle .training-category-mark { background: #f6ecd2; color: #94782f; }
 
 .training-cat-copy strong {
   display: block;

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, jsonb, numeric, index, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, jsonb, numeric, index, boolean, uniqueIndex, customType } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -592,3 +592,32 @@ export const assetTemplates = pgTable("asset_templates", {
 export const insertAssetTemplateSchema = createInsertSchema(assetTemplates).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertAssetTemplate = z.infer<typeof insertAssetTemplateSchema>;
 export type AssetTemplate = typeof assetTemplates.$inferSelect;
+
+// NEO KNOWLEDGE: the transcripts and documents Neo AI answers from. A row is either the
+// transcript of one Training Lab lesson (trainingResourceId set; follows that lesson's
+// visibility) or a standalone document such as Inner Circle material (shared with every client).
+export const neoKnowledge = pgTable("neo_knowledge", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  collection: text("collection").notNull(), // training_lab, inner_circle, other
+  trainingResourceId: integer("training_resource_id").unique().references(() => trainingResources.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  source: text("source").notNull(), // pasted, file, vimeo
+  wordCount: integer("word_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type NeoKnowledge = typeof neoKnowledge.$inferSelect;
+
+const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
+// Passages Neo searches; `search` is the full-text vector of the title (weighted) and passage.
+export const neoKnowledgeChunks = pgTable("neo_knowledge_chunks", {
+  id: serial("id").primaryKey(),
+  knowledgeId: integer("knowledge_id").notNull().references(() => neoKnowledge.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  search: tsvector("search").notNull(),
+}, (table) => [
+  index("idx_neo_chunks_knowledge").on(table.knowledgeId),
+  index("idx_neo_chunks_search").using("gin", table.search),
+]);

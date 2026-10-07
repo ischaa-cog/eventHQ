@@ -14,6 +14,7 @@ import { sendNotificationEmail } from "./email";
 import { passwordProblem } from "./passwords";
 import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "./googleCalendar";
 import { registerPortalRoutes } from "./portal-routes";
+import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
 
@@ -2699,6 +2700,20 @@ export function registerApiRoutes(app: Express): void {
         imageUrl: imageUrl || null,
       });
 
+      // Neo's own training: lesson titles plus the passages that best match this message
+      // (and the previous question, so follow-ups like "what about day 2?" still match).
+      const previousQuestion = [...history].reverse().find(m => m.role === "user")?.content || "";
+      let neoTraining = "";
+      try {
+        const [passages, lessons] = await Promise.all([
+          searchKnowledge(`${content || ""} ${previousQuestion}`, clientId),
+          visibleLessonTitles(clientId),
+        ]);
+        neoTraining = knowledgePrompt(passages, lessons);
+      } catch (error) {
+        console.error("Neo knowledge search failed:", error);
+      }
+
       // Build system prompt with client context
       const systemPrompt = `You are Neo, a friendly and highly knowledgeable AI marketing coach specializing in virtual events and digital marketing. You work directly with ${client?.name || "this client"}${client?.businessName ? ` (${client.businessName})` : ""}${client?.niche ? ` in the ${client.niche} niche` : ""}.
 
@@ -2710,7 +2725,7 @@ You have deep expertise in:
 - Marketing strategy: audience building, launches, campaigns, follow-up sequences
 - Copywriting: headlines, hooks, email subject lines, ad copy
 
-When reviewing data or stats, give specific, actionable insights. Keep responses concise but substantive. Use bullet points for multiple tips. Be encouraging but honest about what the numbers show. When you see images, analyze them thoroughly for marketing effectiveness, design feedback, or data insights.${pageContext ? `\n\nContext: The user is currently viewing the "${pageContext}" page of their dashboard.` : ""}`;
+When reviewing data or stats, give specific, actionable insights. Keep responses concise but substantive. Use bullet points for multiple tips. Be encouraging but honest about what the numbers show. When you see images, analyze them thoroughly for marketing effectiveness, design feedback, or data insights.${pageContext ? `\n\nContext: The user is currently viewing the "${pageContext}" page of their dashboard.` : ""}${neoTraining ? `\n\n${neoTraining}` : ""}`;
 
       // Build messages array for OpenAI
       const openaiMessages: any[] = [{ role: "system", content: systemPrompt }];
@@ -2945,4 +2960,5 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
   });
 
   registerPortalRoutes(app, getRequestUser, canAccessClient);
+  registerNeoKnowledgeRoutes(app, getRequestUser);
 }

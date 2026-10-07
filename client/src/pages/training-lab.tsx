@@ -19,7 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { hasFullAccess } from "@shared/roles";
 import "./training-lab.css";
 
-type Category = "challenge" | "marketing" | "masterclass" | "bonus_training" | "webinar" | "summit" | "partner_sop";
+type Category = "challenge" | "marketing" | "masterclass" | "bonus_training" | "webinar" | "summit" | "partner_sop" | "inner_circle";
 type Resource = { id: number | string; title: string; description?: string | null; category: Category; resourceType: "video" | "document"; url: string; orderIndex: number; visibleClientIds?: number[]; isGlobal?: boolean; legacy?: boolean };
 type Form = { title: string; description: string; category: Category; resourceType: "video" | "document"; url: string; orderIndex: number; visibleClientIds: number[]; isGlobal: boolean };
 
@@ -31,6 +31,8 @@ const categories: { id: Category; label: string; detail: string; eyebrow: string
   { id: "challenge", label: "Five-Day Challenges", detail: "Plan and run a successful challenge.", eyebrow: "04", mark: "5D" },
   { id: "bonus_training", label: "Bonus Training", detail: "Additional lessons and speaker training.", eyebrow: "05", mark: "+" },
   { id: "partner_sop", label: "Partner SOPs", detail: "Partner processes and training.", eyebrow: "06", mark: "—", comingSoon: true },
+  // Kept apart from the core curriculum above: older recordings to watch after it, not first.
+  { id: "inner_circle", label: "Neo's Inner Circle", detail: "Older Inner Circle recordings. Finish the core training first, then dive in.", eyebrow: "07", mark: "IC" },
 ];
 
 const inCategory = (item: Resource, category: Category) =>

@@ -18,7 +18,7 @@ const idOf = (v: any) => Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v
 const url = z.string().url().max(2048).refine(value => /^https?:\/\//i.test(value), "Use an HTTP(S) resource URL");
 const resourceInput = z.object({
   title: z.string().trim().min(1).max(200), description: z.string().max(5000).nullable().optional(),
-  category: z.enum(["challenge", "webinar", "summit", "marketing", "masterclass", "bonus_training", "partner_sop"]),
+  category: z.enum(["challenge", "webinar", "summit", "marketing", "masterclass", "bonus_training", "partner_sop", "inner_circle"]),
   resourceType: z.enum(["video", "document"]), url,
   orderIndex: z.number().int().min(0).max(100000).optional(),
   visibleClientIds: z.array(z.number().int().positive()).max(1000).optional(),

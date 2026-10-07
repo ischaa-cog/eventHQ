@@ -1,7 +1,7 @@
 // Parses a Training Lab bulk-upload CSV. Used by the admin dialog for previews;
 // the server re-validates every row before saving.
 
-export const TRAINING_CATEGORIES = ["marketing", "masterclass", "summit", "challenge", "bonus_training", "partner_sop"] as const;
+export const TRAINING_CATEGORIES = ["marketing", "masterclass", "summit", "challenge", "bonus_training", "partner_sop", "inner_circle"] as const;
 export type TrainingCategory = (typeof TRAINING_CATEGORIES)[number];
 export type BulkTrainingRow = {
   line: number;
@@ -27,6 +27,7 @@ const CATEGORY_ALIASES: Record<string, TrainingCategory> = {
   "5 day challenge": "challenge", "5 day challenges": "challenge",
   bonus: "bonus_training", "bonus training": "bonus_training", "bonus_training": "bonus_training",
   "partner sop": "partner_sop", "partner sops": "partner_sop", "partner_sop": "partner_sop", sop: "partner_sop", sops: "partner_sop",
+  "inner circle": "inner_circle", "inner_circle": "inner_circle", "neo's inner circle": "inner_circle", "neos inner circle": "inner_circle",
 };
 const HEADER_ALIASES: Record<string, keyof Omit<BulkTrainingRow, "line">> = {
   title: "title", name: "title", lesson: "title",
