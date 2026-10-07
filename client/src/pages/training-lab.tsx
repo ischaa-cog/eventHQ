@@ -149,11 +149,9 @@ export default function TrainingLabPage() {
       </header>
       <main className="training-content">
         {preview && <div className="training-preview-note" role="status"><strong>Preview client view — visual only.</strong> You are still signed in as an administrator; this does not impersonate client identity. Resources below remain scoped to the client selected in this workspace.</div>}
-        <section className="training-intro" aria-labelledby="training-title">
+        <section className="training-intro" aria-label="Training Lab">
           <div>
             <div className="training-kicker">EVENTHQ / TRAINING LAB</div>
-            <h1 id="training-title">Learn the workflow.<br /><em>Run the room.</em></h1>
-            <p>A calm place to get oriented, find the right lesson, and keep your event moving forward.</p>
           </div>
           <div className="training-intro-note"><span className="training-note-line" /><span>Pick the training for<br />the event you’re running next.</span></div>
         </section>
