@@ -25,7 +25,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   challenge: "Five-Day Challenges", bonus_training: "Bonus Training", partner_sop: "Partner SOPs",
   inner_circle: "Neo's Inner Circle",
 };
-const COLLECTIONS: Record<string, string> = { inner_circle: "Inner Circle", other: "Other material", training_lab: "Training Lab" };
+const COLLECTIONS: Record<string, string> = {
+  inner_circle: "Inner Circle", writing: "Neo's writing", youtube: "YouTube", instagram: "Instagram", other: "Other material", training_lab: "Training Lab",
+};
+const DOCUMENT_COLLECTIONS = ["inner_circle", "writing", "youtube", "instagram", "other"];
+const DOCS_SHOWN = 100;
 const host = (url: string) => { try { return new URL(url).hostname.replace(/^www\.|^player\./, ""); } catch { return ""; } };
 // apiRequest errors read "400: {"error":"…"}"; show just the message.
 const errorText = (e: unknown) => {
@@ -45,6 +49,8 @@ export default function NeoKnowledgePage() {
   const [text, setText] = useState("");
   const [source, setSource] = useState<"pasted" | "file">("pasted");
   const [filter, setFilter] = useState("");
+  const [docFilter, setDocFilter] = useState("");
+  const [docCollection, setDocCollection] = useState("all");
   const [question, setQuestion] = useState("");
   const [importing, setImporting] = useState<{ done: number; total: number; failed: string[] } | null>(null);
 
@@ -55,6 +61,12 @@ export default function NeoKnowledgePage() {
     const term = filter.trim().toLowerCase();
     return term ? lessons.filter(l => `${l.title} ${CATEGORY_LABELS[l.category] || ""}`.toLowerCase().includes(term)) : lessons;
   }, [lessons, filter]);
+
+  const docCounts = useMemo(() => documents.reduce<Record<string, number>>((counts, d) => ({ ...counts, [d.collection]: (counts[d.collection] || 0) + 1 }), {}), [documents]);
+  const shownDocs = useMemo(() => {
+    const term = docFilter.trim().toLowerCase();
+    return documents.filter(d => (docCollection === "all" || d.collection === docCollection) && (!term || d.title.toLowerCase().includes(term)));
+  }, [documents, docFilter, docCollection]);
 
   const openLesson = async (lesson: Lesson) => {
     setEditing({ kind: "lesson", lesson }); setSource("pasted"); setText("");
@@ -110,32 +122,41 @@ export default function NeoKnowledgePage() {
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-semibold"><BookOpen className="h-6 w-6" />Neo Knowledge</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">What Neo AI answers from. Neo searches these transcripts and documents on every message and names the lesson it drew from. A client's Neo only uses transcripts of lessons that client can see. Inner Circle documents are used for every client.</p>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">What Neo AI answers from. Neo searches these transcripts and documents on every message and names the lesson it drew from. A client's Neo only uses transcripts of lessons that client can see. Inner Circle material, Neo's writing and his YouTube and Instagram content are used for every client.</p>
       </div>
 
       {overview.isError && <p role="alert" className="text-sm text-destructive">Couldn't load Neo's knowledge: {errorText(overview.error)}</p>}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{loaded}<span className="text-base font-normal text-muted-foreground"> / {lessons.length}</span></div><div className="text-sm text-muted-foreground">Training Lab lessons with a transcript</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{documents.length}</div><div className="text-sm text-muted-foreground">Inner Circle &amp; other documents</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{documents.length}</div><div className="text-sm text-muted-foreground">Documents, videos &amp; posts</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{totalWords.toLocaleString()}</div><div className="text-sm text-muted-foreground">Words Neo can draw on</div></CardContent></Card>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
-          <div><CardTitle>Inner Circle &amp; other material</CardTitle><CardDescription>Program content, frameworks, call transcripts and notes. Don't add anything clients shouldn't hear back, such as contracts, prices paid or member details.</CardDescription></div>
+          <div><CardTitle>Neo's material</CardTitle><CardDescription>Inner Circle content, Neo's books, guides and emails, and his YouTube and Instagram transcripts. Don't add anything clients shouldn't hear back, such as contracts, prices paid or member details.</CardDescription></div>
           <Button size="sm" onClick={() => openDocument()}><Plus className="h-4 w-4" />Add document</Button>
         </CardHeader>
         <CardContent>
+          {documents.length > 0 && <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-48 flex-1"><Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="pl-8" value={docFilter} onChange={e => setDocFilter(e.target.value)} placeholder="Find a document or video" aria-label="Find a document or video" /></div>
+            <Select value={docCollection} onValueChange={setDocCollection}><SelectTrigger className="w-52" aria-label="Collection"><SelectValue /></SelectTrigger><SelectContent>
+              <SelectItem value="all">All ({documents.length})</SelectItem>
+              {DOCUMENT_COLLECTIONS.filter(c => docCounts[c]).map(c => <SelectItem key={c} value={c}>{COLLECTIONS[c]} ({docCounts[c]})</SelectItem>)}
+            </SelectContent></Select>
+          </div>}
           {documents.length === 0 ? <p className="text-sm text-muted-foreground">No documents yet. Add Neo's Inner Circle material here.</p> :
-            <ul className="divide-y">{documents.map(doc => <li key={doc.id} className="flex flex-wrap items-center gap-3 py-2">
+            shownDocs.length === 0 ? <p className="text-sm text-muted-foreground">Nothing matches that search.</p> : <>
+            <ul className="divide-y">{shownDocs.slice(0, DOCS_SHOWN).map(doc => <li key={doc.id} className="flex flex-wrap items-center gap-3 py-2">
               <FileText className="h-4 w-4 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate font-medium">{doc.title}</span>
               <Badge variant="outline">{COLLECTIONS[doc.collection] || doc.collection}</Badge>
               <span className="text-xs text-muted-foreground">{doc.wordCount.toLocaleString()} words</span>
               <Button variant="ghost" size="icon" aria-label={`Edit ${doc.title}`} onClick={() => openDocument(doc)}><Pencil className="h-4 w-4" /></Button>
               <Button variant="ghost" size="icon" aria-label={`Delete ${doc.title}`} onClick={() => { if (window.confirm(`Remove "${doc.title}" from Neo's knowledge?`)) remove.mutate(doc.id); }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-            </li>)}</ul>}
+            </li>)}</ul>
+            {shownDocs.length > DOCS_SHOWN && <p className="pt-2 text-xs text-muted-foreground">Showing {DOCS_SHOWN} of {shownDocs.length.toLocaleString()}. Search to find the rest.</p>}</>}
         </CardContent>
       </Card>
 
@@ -191,7 +212,7 @@ export default function NeoKnowledgePage() {
         <form className="space-y-4" onSubmit={e => { e.preventDefault(); save.mutate(); }}>
           {editing?.kind === "document" && <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
             <div><Label htmlFor="neo-doc-title">Title</Label><Input id="neo-doc-title" required value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Inner Circle — Offer Stacking Call" /></div>
-            <div><Label>Collection</Label><Select value={collection} onValueChange={setCollection}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inner_circle">Inner Circle</SelectItem><SelectItem value="other">Other material</SelectItem></SelectContent></Select></div>
+            <div><Label>Collection</Label><Select value={collection} onValueChange={setCollection}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DOCUMENT_COLLECTIONS.map(c => <SelectItem key={c} value={c}>{COLLECTIONS[c]}</SelectItem>)}</SelectContent></Select></div>
           </div>}
           <div>
             <div className="flex items-center justify-between"><Label htmlFor="neo-text">Text</Label>

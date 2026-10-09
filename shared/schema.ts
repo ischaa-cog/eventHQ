@@ -599,10 +599,10 @@ export type AssetTemplate = typeof assetTemplates.$inferSelect;
 export const neoKnowledge = pgTable("neo_knowledge", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
-  collection: text("collection").notNull(), // training_lab, inner_circle, other
+  collection: text("collection").notNull(), // training_lab, inner_circle, writing, youtube, instagram, other
   trainingResourceId: integer("training_resource_id").unique().references(() => trainingResources.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
-  source: text("source").notNull(), // pasted, file, vimeo
+  source: text("source").notNull(), // pasted, file, vimeo, youtube, drive
   wordCount: integer("word_count").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

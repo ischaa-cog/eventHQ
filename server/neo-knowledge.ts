@@ -145,12 +145,18 @@ const CATEGORY_LABELS: Record<string, string> = {
   challenge: "Five-Day Challenges", bonus_training: "Bonus Training", partner_sop: "Partner SOPs",
   inner_circle: "Neo's Inner Circle (older recordings)",
 };
-const COLLECTION_LABELS: Record<string, string> = { training_lab: "Training Lab lesson (core curriculum)", inner_circle: "Neo's Inner Circle (older recording)", other: "Neo's material" };
+const COLLECTION_LABELS: Record<string, string> = {
+  training_lab: "Training Lab lesson (core curriculum)", inner_circle: "Neo's Inner Circle (older recording)",
+  writing: "Neo's writing (books, guides, emails, plans)", youtube: "Neo's YouTube video", instagram: "Neo's Instagram post",
+  other: "Neo's material",
+};
+// Collections an admin can file a standalone document under (Training Lab transcripts are tied to a lesson).
+export const DOCUMENT_COLLECTIONS = ["inner_circle", "writing", "youtube", "instagram", "other"] as const;
 
 // The part of Neo's system prompt that carries Neo's own teaching.
 export function knowledgePrompt(passages: NeoPassage[], lessons: { title: string; category: string }[]): string {
   const parts = [`HOW TO USE NEO'S TRAINING:
-Neo's own teaching (Training Lab lessons and Inner Circle material) is your primary source. When the excerpts below cover the question, answer from them: use Neo's frameworks, terminology, numbers and steps rather than generic marketing advice, and name the lesson you drew from (e.g. "see the *Masterclass Show-Up Processes* lesson in the Training Lab"). If the excerpts don't cover something, say so briefly and then give your best advice. Never invent quotes or claim a lesson says something it doesn't.
+Neo's own teaching is your primary source: Training Lab lessons, Inner Circle material, his writing (books, guides, emails, plans) and his YouTube and Instagram content. When the excerpts below cover the question, answer from them: use Neo's frameworks, stories, terminology, numbers and steps rather than generic marketing advice. Name the Training Lab lesson you drew from when there is one (e.g. "see the *Masterclass Show-Up Processes* lesson in the Training Lab"); for YouTube or Instagram you can mention the video by title. Many YouTube videos are Circle of Greatness podcast interviews where the guest does most of the talking: present a guest's story or advice as theirs ("on Neo's podcast, the guest explained…"), not as Neo's view. Offers, prices and dates in emails and sales copy are from past campaigns: never quote them as current. If the excerpts don't cover something, say so briefly and then give your best advice. Never invent quotes or claim a lesson says something it doesn't.
 The core curriculum (every Training Lab module except Neo's Inner Circle) is what clients should watch first. Inner Circle recordings are older, supplementary material: when recommending lessons, point to the core curriculum first and suggest Inner Circle recordings only as extra depth, and if the two disagree, follow the core curriculum.`];
   if (lessons.length) {
     const byCategory = new Map<string, string[]>();
@@ -205,7 +211,7 @@ const contentInput = z.string().max(NEO_KNOWLEDGE_MAX_CHARS, "That transcript is
   .transform(cleanTranscript).refine(text => text.length > 0, "Add the transcript text");
 const documentInput = z.object({
   title: z.string().trim().min(1).max(200),
-  collection: z.enum(["inner_circle", "other"]),
+  collection: z.enum(DOCUMENT_COLLECTIONS),
   content: contentInput,
   source: z.enum(["pasted", "file"]).default("pasted"),
 });
