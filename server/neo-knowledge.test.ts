@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { eq, inArray } from "drizzle-orm";
 import { neoKnowledge, neoKnowledgeChunks, trainingResources } from "@shared/schema";
 import { db } from "./storage";
-import { chunkText, cleanTranscript, knowledgePrompt, saveKnowledge, searchKnowledge, searchTerms, vimeoVideoId } from "./neo-knowledge";
+import { chunkText, cleanTranscript, embedPendingChunks, knowledgePrompt, saveKnowledge, searchKnowledge, searchTerms, vimeoVideoId, type Embedder } from "./neo-knowledge";
 
 test("cleanTranscript turns WebVTT and SRT captions into plain text", () => {
   const vtt = "WEBVTT\n\nNOTE made by Vimeo\nignored\n\n1\n00:00:01.000 --> 00:00:03.000\n<v Neo>Welcome to the</v>\n\n2\n00:00:03.000 --> 00:00:05.000\nWelcome to the\nmasterclass &amp; more\n";
@@ -82,5 +82,26 @@ test("Neo only finds transcripts of lessons the client can see", async () => {
     await db.delete(neoKnowledge).where(inArray(neoKnowledge.id, ids));
     await db.delete(trainingResources).where(inArray(trainingResources.id, lessons.map(l => l.id)));
     assert.equal((await db.select().from(neoKnowledgeChunks).where(eq(neoKnowledgeChunks.knowledgeId, ids[0]))).length, 0);
+  }
+});
+
+test("Neo finds passages by meaning when they share no words with the question", async () => {
+  const marker = `zq${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+  // Fake embedder: anything about pricing points one way, everything else another.
+  const unit = (i: number) => Array.from({ length: 512 }, (_, j) => (j === i ? 1 : 0));
+  const embed: Embedder = async texts => texts.map(t => /rates|charge/i.test(t) ? unit(0) : unit(1));
+  const ids: number[] = [];
+  try {
+    const pricing = await saveKnowledge({ title: `Pricing ${marker}`, collection: "writing", content: "Double your rates and stand on them.", source: "pasted" });
+    const other = await saveKnowledge({ title: `Show-up ${marker}`, collection: "writing", content: "Text reminders one hour before going live.", source: "pasted" });
+    ids.push(pricing.id, other.id);
+    for (const id of ids) assert.deepEqual(await embedPendingChunks(embed, 10, id).then(r => r.embedded), 1);
+
+    const results = await searchKnowledge("How much should I charge?", null, 6, embed);
+    assert.equal(results[0]?.title, `Pricing ${marker}`);
+    // Without an embedder, search still works on keywords alone.
+    assert.equal((await searchKnowledge(`text reminders one hour before going live ${marker}`, null, 6, null))[0]?.title, `Show-up ${marker}`);
+  } finally {
+    await db.delete(neoKnowledge).where(inArray(neoKnowledge.id, ids));
   }
 });

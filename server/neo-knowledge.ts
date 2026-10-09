@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import OpenAI from "openai";
 import { isAuthenticated } from "./auth";
 import { db } from "./storage";
 import { hasFullAccess } from "@shared/roles";
@@ -98,28 +99,104 @@ export async function saveKnowledge(entry: {
   });
 }
 
+// Saves, then indexes the document's passages for meaning search when OpenAI is configured. If
+// that fails, they stay keyword-searchable and the admin page's "Build search index" picks them up.
+async function saveAndEmbed(entry: Parameters<typeof saveKnowledge>[0]) {
+  const saved = await saveKnowledge(entry);
+  const embed = openAIEmbedder();
+  if (embed) {
+    try { await embedPendingChunks(embed, 1000, saved.id); } catch (error) { console.error("Neo embedding failed:", error); }
+  }
+  return saved;
+}
+
 export type NeoPassage = { title: string; collection: string; content: string };
+
+// --- Meaning-based search (embeddings) ---
+// Keyword search alone does badly on conversational podcast transcripts, so every passage also
+// gets an embedding, and Neo searches by meaning and by keywords and merges the two rankings.
+export type Embedder = (texts: string[]) => Promise<number[][]>;
+const EMBEDDING_MODEL = "text-embedding-3-small";
+const EMBEDDING_DIMENSIONS = 512;
+
+export function openAIEmbedder(): Embedder | null {
+  if (!process.env.OPENAI_API_KEY) return null;
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return async texts => {
+    const res = await openai.embeddings.create({ model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS, input: texts });
+    return res.data.sort((a, b) => a.index - b.index).map(d => d.embedding);
+  };
+}
+
+const toVector = (values: number[]) => `[${values.join(",")}]`;
+
+// Embeds up to `max` passages that don't have an embedding yet. Returns how many are still missing.
+export async function embedPendingChunks(embed: Embedder, max = 300, knowledgeId?: number): Promise<{ embedded: number; remaining: number }> {
+  const rows = (await db.execute(sql`
+    select c.id, k.title, c.content from neo_knowledge_chunks c join neo_knowledge k on k.id = c.knowledge_id
+    where c.embedding is null ${knowledgeId ? sql`and c.knowledge_id = ${knowledgeId}` : sql``} order by c.id limit ${max}`)).rows as { id: number; title: string; content: string }[];
+  for (let i = 0; i < rows.length; i += 100) {
+    const batch = rows.slice(i, i + 100);
+    const vectors = await embed(batch.map(r => `${r.title}\n\n${r.content}`));
+    await db.execute(sql`
+      update neo_knowledge_chunks c set embedding = v.embedding::vector
+      from (values ${sql.join(batch.map((r, j) => sql`(${r.id}::int, ${toVector(vectors[j])})`), sql`, `)}) as v(id, embedding)
+      where c.id = v.id`);
+  }
+  const [{ remaining }] = (await db.execute(sql`select count(*)::int as remaining from neo_knowledge_chunks where embedding is null`)).rows as { remaining: number }[];
+  return { embedded: rows.length, remaining };
+}
+
+export async function embeddingProgress(): Promise<{ total: number; embedded: number }> {
+  const [row] = (await db.execute(sql`select count(*)::int as total, count(embedding)::int as embedded from neo_knowledge_chunks`)).rows as { total: number; embedded: number }[];
+  return row;
+}
+
+type Hit = { chunkId: number; id: number; title: string; collection: string; category: string | null; content: string };
 
 // Best-matching passages this client may see: standalone documents, plus transcripts of
 // lessons that are shared with every client or assigned to this one (clientId null: every
 // lesson, for the admin search test). At most 2 passages per source.
-export async function searchKnowledge(question: string, clientId: number | null, limit = 6): Promise<NeoPassage[]> {
-  const terms = searchTerms(question);
-  if (!terms) return [];
-  const result = await db.execute(sql`
-    select k.id, k.title, k.collection, r.category, c.content, ts_rank(c.search, q, 1) as rank
+export async function searchKnowledge(question: string, clientId: number | null, limit = 6, embed: Embedder | null = openAIEmbedder()): Promise<NeoPassage[]> {
+  const visible = sql`(k.training_resource_id is null
+    or (not r.archived and ${clientId === null ? sql`true` : sql`(r.is_global or ${clientId} = any(r.visible_client_ids))`}))`;
+  const select = sql`select c.id as "chunkId", k.id, k.title, k.collection, r.category, c.content
     from neo_knowledge_chunks c
     join neo_knowledge k on k.id = c.knowledge_id
-    left join training_resources r on r.id = k.training_resource_id
+    left join training_resources r on r.id = k.training_resource_id`;
+  const terms = searchTerms(question);
+  const byKeyword = async () => !terms ? [] : (await db.execute(sql`${select}
     cross join to_tsquery('english', ${terms}) q
-    where c.search @@ q
-      and (k.training_resource_id is null
-        or (not r.archived and ${clientId === null ? sql`true` : sql`(r.is_global or ${clientId} = any(r.visible_client_ids))`}))
-    order by rank desc
-    limit ${limit * 4}`);
+    where c.search @@ q and ${visible}
+    order by ts_rank(c.search, q, 1) desc limit ${limit * 4}`)).rows as Hit[];
+  const byMeaning = async () => {
+    if (!embed || !question.trim()) return [];
+    try {
+      const [vector] = await embed([question.slice(0, 8000)]);
+      return (await db.execute(sql`${select}
+        where c.embedding is not null and ${visible}
+        order by c.embedding <=> ${toVector(vector)}::vector limit ${limit * 4}`)).rows as Hit[];
+    } catch (error) {
+      console.error("Neo meaning search failed; using keywords only:", error);
+      return [];
+    }
+  };
+  const [keywordHits, meaningHits] = await Promise.all([byKeyword(), byMeaning()]);
+
+  // Reciprocal rank fusion: a passage high in either list ranks high; meaning counts a bit more.
+  const scores = new Map<number, { hit: Hit; score: number }>();
+  const add = (hits: Hit[], weight: number) => hits.forEach((hit, rank) => {
+    const entry = scores.get(hit.chunkId) ?? { hit, score: 0 };
+    entry.score += weight / (60 + rank);
+    scores.set(hit.chunkId, entry);
+  });
+  add(meaningHits, 1);
+  add(keywordHits, 0.7);
+  const ranked = Array.from(scores.values()).sort((a, b) => b.score - a.score).map(e => e.hit);
+
   const perSource = new Map<number, number>();
   const passages: NeoPassage[] = [];
-  for (const row of result.rows as any[]) {
+  for (const row of ranked) {
     const used = perSource.get(row.id) ?? 0;
     if (used >= 2) continue;
     perSource.set(row.id, used + 1);
@@ -152,6 +229,22 @@ const COLLECTION_LABELS: Record<string, string> = {
 };
 // Collections an admin can file a standalone document under (Training Lab transcripts are tied to a lesson).
 export const DOCUMENT_COLLECTIONS = ["inner_circle", "writing", "youtube", "instagram", "other"] as const;
+
+// Who Neo is and how he talks, drawn from his bios, Circle of Greatness core values and the
+// voice rules of his "Neo Copywriter" custom GPT.
+export const NEO_VOICE = `WHO NEO IS:
+You are Neo AI, the AI coach built on the teaching of Nehemiah "Neo" Davis, CEO of Circle of Greatness and host of the Circle of Greatness podcast. Neo was born and raised in Philadelphia. His father went to prison when he was two; he was kicked out of high school, expelled from college and fired from ten jobs. At 21 he decided to stop surviving and start building: a fruit truck and a junk hauling business first, then digital businesses. He now runs an eight-figure digital company, has helped partners build eight-figure businesses, runs challenges, masterclasses, summits, masterminds and live events for coaches and entrepreneurs, has spoken at Funnel Hacking Live, and the street he grew up on is now Nehemiah Davis Way. He's a husband and father of four.
+You speak in Neo's voice and can share his story and lessons as they appear in his material, but you are his AI coach, not Neo in person: if someone asks, say so plainly. Never invent experiences, results, numbers or opinions Neo hasn't shared.
+
+HOW NEO TALKS:
+- Energetic, direct and encouraging, like a mentor who believes in you and won't let you make excuses. Real talk, plain words, short sentences, a little Philly/urban flavor. Push toward the next action.
+- Lead with the answer, then the steps. Use his stories and examples when they fit.
+- His core values ("5 ingredients to greatness"), to use naturally, not in every message: "It has to work or it HAS to work." "Success loves speed." "We do everything in excellence." "Extreme ownership." "How you do anything is how you do everything." "Never settle." Also: "Believe in yourself and your goals."
+- His sign-off is "To your greatness." Use it to close a pep talk now and then, and on emails written as Neo.
+- Never use filler AI phrases such as: delve, dive into, embark, journey, tapestry, realm, landscape, navigate, elevate, unleash, unlock, harness, game changer, skyrocket, robust, cutting-edge, seamless, testament, vibrant, "in today's digital age", "in the world of", "when it comes to", "it's important to note", "it's worth noting", "in conclusion", "in summary", furthermore, moreover, additionally, notably, indeed, "my friend".
+
+WRITING COPY FOR THE CLIENT:
+Write in the client's name and voice unless they ask for it as Neo. For promotional emails use Neo's structure: subject line, preheader, personal greeting, a story or emotional hook, the problem and why it hurts, the offer as the solution, proof, urgency, one clear call to action repeated, sign-off, and a P.S. that adds urgency or a bonus.`;
 
 // The part of Neo's system prompt that carries Neo's own teaching.
 export function knowledgePrompt(passages: NeoPassage[], lessons: { title: string; category: string }[]): string {
@@ -240,6 +333,7 @@ export function registerNeoKnowledgeRoutes(app: Express, getRequestUser: (req: a
       const byLesson = new Map(withChunks.filter(d => d.trainingResourceId).map(d => [d.trainingResourceId, d]));
       res.json({
         vimeoConfigured: !!vimeoToken(),
+        searchIndex: { ...(await embeddingProgress()), configured: !!process.env.OPENAI_API_KEY },
         lessons: lessons.map(l => ({ ...l, vimeo: !!vimeoVideoId(l.url), knowledge: byLesson.get(l.id) || null })),
         documents: withChunks.filter(d => !d.trainingResourceId),
       });
@@ -260,7 +354,7 @@ export function registerNeoKnowledgeRoutes(app: Express, getRequestUser: (req: a
     const parsed = z.object({ content: contentInput, source: z.enum(["pasted", "file"]).default("pasted") }).safeParse(req.body);
     if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message);
     try {
-      res.json(await saveKnowledge({ title: lesson.title, collection: "training_lab", trainingResourceId: lesson.id, ...parsed.data }));
+      res.json(await saveAndEmbed({ title: lesson.title, collection: "training_lab", trainingResourceId: lesson.id, ...parsed.data }));
     } catch { fail(res, 500, "Failed to save the transcript"); }
   });
 
@@ -273,7 +367,7 @@ export function registerNeoKnowledgeRoutes(app: Express, getRequestUser: (req: a
     if (!videoId) return fail(res, 400, "This lesson isn't a Vimeo video");
     try {
       const content = await fetchVimeoTranscript(videoId, vimeoToken());
-      res.json(await saveKnowledge({ title: lesson.title, collection: "training_lab", trainingResourceId: lesson.id, content, source: "vimeo" }));
+      res.json(await saveAndEmbed({ title: lesson.title, collection: "training_lab", trainingResourceId: lesson.id, content, source: "vimeo" }));
     } catch (e: any) { fail(res, 502, e?.message || "Vimeo import failed"); }
   });
 
@@ -281,7 +375,7 @@ export function registerNeoKnowledgeRoutes(app: Express, getRequestUser: (req: a
     if (!(await requireAdmin(req, res))) return;
     const parsed = documentInput.safeParse(req.body);
     if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message);
-    try { res.status(201).json(await saveKnowledge(parsed.data)); } catch { fail(res, 500, "Failed to save the document"); }
+    try { res.status(201).json(await saveAndEmbed(parsed.data)); } catch { fail(res, 500, "Failed to save the document"); }
   });
 
   app.put("/api/neo/knowledge/documents/:id", isAuthenticated, async (req: any, res) => {
@@ -290,13 +384,21 @@ export function registerNeoKnowledgeRoutes(app: Express, getRequestUser: (req: a
     if (!existing || existing.trainingResourceId) return fail(res, 404, "Document not found");
     const parsed = documentInput.safeParse(req.body);
     if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message);
-    try { res.json(await saveKnowledge({ id: existing.id, ...parsed.data })); } catch { fail(res, 500, "Failed to save the document"); }
+    try { res.json(await saveAndEmbed({ id: existing.id, ...parsed.data })); } catch { fail(res, 500, "Failed to save the document"); }
   });
 
   app.delete("/api/neo/knowledge/:id", isAuthenticated, async (req: any, res) => {
     if (!(await requireAdmin(req, res))) return;
     await db.delete(neoKnowledge).where(eq(neoKnowledge.id, idOf(req.params.id)));
     res.json({ success: true });
+  });
+
+  // Indexes the next batch of passages for meaning search; the admin page calls this until none remain.
+  app.post("/api/neo/knowledge/embed", isAuthenticated, async (req: any, res) => {
+    if (!(await requireAdmin(req, res))) return;
+    const embed = openAIEmbedder();
+    if (!embed) return fail(res, 400, "OpenAI isn't connected. Add OPENAI_API_KEY to the server settings.");
+    try { res.json(await embedPendingChunks(embed, 500)); } catch (e: any) { fail(res, 502, e?.message || "Indexing failed"); }
   });
 
   // Shows which passages Neo would use for a question, as a given client would see them.

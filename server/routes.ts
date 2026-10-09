@@ -14,7 +14,7 @@ import { sendNotificationEmail } from "./email";
 import { passwordProblem } from "./passwords";
 import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "./googleCalendar";
 import { registerPortalRoutes } from "./portal-routes";
-import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt } from "./neo-knowledge";
+import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
 
@@ -2715,7 +2715,9 @@ export function registerApiRoutes(app: Express): void {
       }
 
       // Build system prompt with client context
-      const systemPrompt = `You are Neo, a friendly and highly knowledgeable AI marketing coach specializing in virtual events and digital marketing. You work directly with ${client?.name || "this client"}${client?.businessName ? ` (${client.businessName})` : ""}${client?.niche ? ` in the ${client.niche} niche` : ""}.
+      const systemPrompt = `${NEO_VOICE}
+
+You are a highly knowledgeable marketing coach specializing in virtual events and digital marketing. You work directly with ${client?.name || "this client"}${client?.businessName ? ` (${client.businessName})` : ""}${client?.niche ? ` in the ${client.niche} niche` : ""}.
 
 You have deep expertise in:
 - Virtual events: webinars, challenges, summits, and live launches

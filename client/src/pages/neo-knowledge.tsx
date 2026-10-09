@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 
 type Knowledge = { id: number; title: string; collection: string; trainingResourceId: number | null; source: string; wordCount: number; chunks: number; updatedAt: string };
 type Lesson = { id: number; title: string; category: string; url: string; resourceType: string; vimeo: boolean; knowledge: Knowledge | null };
-type Overview = { vimeoConfigured: boolean; lessons: Lesson[]; documents: Knowledge[] };
+type Overview = { vimeoConfigured: boolean; searchIndex: { total: number; embedded: number; configured: boolean }; lessons: Lesson[]; documents: Knowledge[] };
 type Passage = { title: string; collection: string; content: string };
 // What the transcript dialog is editing: a lesson's transcript, a new document, or an existing one.
 type Editing = { kind: "lesson"; lesson: Lesson } | { kind: "document"; doc?: Knowledge };
@@ -100,6 +100,25 @@ export default function NeoKnowledgePage() {
     mutationFn: (id: number) => apiRequest("DELETE", `/api/neo/knowledge/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
+  // Indexes passages for meaning search in batches until none are left.
+  const [indexing, setIndexing] = useState(false);
+  const buildIndex = async () => {
+    setIndexing(true);
+    try {
+      let remaining = Infinity;
+      while (remaining > 0) {
+        const res = await (await apiRequest("POST", "/api/neo/knowledge/embed")).json() as { embedded: number; remaining: number };
+        remaining = res.embedded ? res.remaining : 0;
+        qc.invalidateQueries({ queryKey: KEY });
+      }
+      toast({ title: "Search index is up to date" });
+    } catch (e) {
+      toast({ title: "Indexing stopped", description: errorText(e), variant: "destructive" });
+    } finally {
+      setIndexing(false);
+      qc.invalidateQueries({ queryKey: KEY });
+    }
+  };
   const importVimeo = async (targets: Lesson[]) => {
     setImporting({ done: 0, total: targets.length, failed: [] });
     const failed: string[] = [];
@@ -126,6 +145,17 @@ export default function NeoKnowledgePage() {
       </div>
 
       {overview.isError && <p role="alert" className="text-sm text-destructive">Couldn't load Neo's knowledge: {errorText(overview.error)}</p>}
+
+      {overview.data && overview.data.searchIndex.embedded < overview.data.searchIndex.total && <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+          <Search className="h-5 w-5 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">Search index: {overview.data.searchIndex.embedded.toLocaleString()} of {overview.data.searchIndex.total.toLocaleString()} passages</div>
+            <div className="text-sm text-muted-foreground">{overview.data.searchIndex.configured ? "Indexed passages let Neo find answers by meaning, not just matching words. New documents are indexed when you save them." : "Add OPENAI_API_KEY to the server settings to index passages."}</div>
+          </div>
+          {overview.data.searchIndex.configured && <Button size="sm" onClick={buildIndex} disabled={indexing}>{indexing ? "Indexing…" : "Build search index"}</Button>}
+        </CardContent>
+      </Card>}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{loaded}<span className="text-base font-normal text-muted-foreground"> / {lessons.length}</span></div><div className="text-sm text-muted-foreground">Training Lab lessons with a transcript</div></CardContent></Card>

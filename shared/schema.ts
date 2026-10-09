@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, jsonb, numeric, index, boolean, uniqueIndex, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, jsonb, numeric, index, boolean, uniqueIndex, customType, vector } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -617,7 +617,10 @@ export const neoKnowledgeChunks = pgTable("neo_knowledge_chunks", {
   chunkIndex: integer("chunk_index").notNull(),
   content: text("content").notNull(),
   search: tsvector("search").notNull(),
+  // Meaning of the passage (OpenAI text-embedding-3-small, 512 dimensions); null until indexed.
+  embedding: vector("embedding", { dimensions: 512 }),
 }, (table) => [
   index("idx_neo_chunks_knowledge").on(table.knowledgeId),
   index("idx_neo_chunks_search").using("gin", table.search),
+  index("idx_neo_chunks_embedding").using("hnsw", table.embedding.op("vector_cosine_ops")),
 ]);
