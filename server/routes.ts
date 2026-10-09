@@ -2688,6 +2688,10 @@ export function registerApiRoutes(app: Express): void {
       if (!content && !imageUrl) {
         return res.status(400).json({ error: "Message content or image required" });
       }
+      // Checked before saving the message, so an unanswerable message isn't left in the chat.
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(503).json({ error: "Neo AI isn't connected yet. Your EventHQ team needs to finish setting it up." });
+      }
 
       const client = await storage.getClient(clientId);
       const history = await storage.getTuckMessages(chatId);
