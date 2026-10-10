@@ -44,7 +44,7 @@ test("knowledgePrompt lists lessons and puts core curriculum before Inner Circle
   assert.match(prompt, /Masterclass: Overview Of Masterclasses/);
   assert.match(prompt, /Neo's Inner Circle \(older recordings\): Mindset Module/);
   assert.match(prompt, /point to the core curriculum first/);
-  assert.match(prompt, /\[1\] Neo's Inner Circle \(older recording\): "Show-Up Processes"\nText the night before\./);
+  assert.match(prompt, /\[1\] Your Inner Circle \(older recording\): "Show-Up Processes"\nText the night before\./);
 });
 
 test("Neo only finds transcripts of lessons the client can see", async () => {
