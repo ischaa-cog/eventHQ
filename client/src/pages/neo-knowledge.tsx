@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 
 type Knowledge = { id: number; title: string; collection: string; trainingResourceId: number | null; source: string; wordCount: number; chunks: number; updatedAt: string };
 type Lesson = { id: number; title: string; category: string; url: string; resourceType: string; vimeo: boolean; knowledge: Knowledge | null };
-type Overview = { vimeoConfigured: boolean; searchIndex: { total: number; embedded: number; configured: boolean }; lessons: Lesson[]; documents: Knowledge[] };
+type Overview = { vimeoConfigured: boolean; searchIndex: { total: number; embedded: number; configured: boolean }; lessons: Lesson[]; documents: Knowledge[]; unusedCollections: string[] };
 type Passage = { title: string; collection: string; content: string };
 // What the transcript dialog is editing: a lesson's transcript, a new document, or an existing one.
 type Editing = { kind: "lesson"; lesson: Lesson } | { kind: "document"; doc?: Knowledge };
@@ -29,6 +29,8 @@ const COLLECTIONS: Record<string, string> = {
   inner_circle: "Inner Circle", writing: "Neo's writing", youtube: "YouTube", instagram: "Instagram", other: "Other material", training_lab: "Training Lab",
 };
 const DOCUMENT_COLLECTIONS = ["inner_circle", "writing", "youtube", "instagram", "other"];
+// Collections a new document can be filed under. YouTube and Instagram are left out: Neo doesn't answer from them.
+const ADDABLE_COLLECTIONS = ["inner_circle", "writing", "other"];
 const DOCS_SHOWN = 100;
 const host = (url: string) => { try { return new URL(url).hostname.replace(/^www\.|^player\./, ""); } catch { return ""; } };
 // apiRequest errors read "400: {"error":"…"}"; show just the message.
@@ -135,7 +137,11 @@ export default function NeoKnowledgePage() {
   });
 
   const vimeoMissing = lessons.filter(l => l.vimeo && !l.knowledge);
-  const totalWords = [...lessons.map(l => l.knowledge?.wordCount || 0), ...documents.map(d => d.wordCount)].reduce((a, b) => a + b, 0);
+  // Neo never answers from these collections (podcast guests and unverified clips).
+  const unused = overview.data?.unusedCollections || [];
+  const usedDocs = documents.filter(d => !unused.includes(d.collection));
+  const unusedCount = documents.length - usedDocs.length;
+  const totalWords = [...lessons.map(l => l.knowledge?.wordCount || 0), ...usedDocs.map(d => d.wordCount)].reduce((a, b) => a + b, 0);
 
   return <AppLayout title="Neo Knowledge" mode="agency">
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
@@ -159,13 +165,13 @@ export default function NeoKnowledgePage() {
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{loaded}<span className="text-base font-normal text-muted-foreground"> / {lessons.length}</span></div><div className="text-sm text-muted-foreground">Training Lab lessons with a transcript</div></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{documents.length}</div><div className="text-sm text-muted-foreground">Documents, videos &amp; posts</div></CardContent></Card>
+        <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{usedDocs.length}</div><div className="text-sm text-muted-foreground">Documents Neo answers from{unusedCount > 0 ? ` (${unusedCount.toLocaleString()} YouTube/Instagram items are stored but not used)` : ""}</div></CardContent></Card>
         <Card><CardContent className="p-4"><div className="text-2xl font-semibold">{totalWords.toLocaleString()}</div><div className="text-sm text-muted-foreground">Words Neo can draw on</div></CardContent></Card>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
-          <div><CardTitle>Neo's material</CardTitle><CardDescription>Inner Circle content, Neo's books, guides and emails, and his YouTube and Instagram transcripts. Don't add anything clients shouldn't hear back, such as contracts, prices paid or member details.</CardDescription></div>
+          <div><CardTitle>Neo's material</CardTitle><CardDescription>Inner Circle content and Neo's books, guides and emails. Neo AI does not answer from YouTube or Instagram content, because it includes podcast guests and clips we can't verify. Don't add anything clients shouldn't hear back, such as contracts, prices paid or member details.</CardDescription></div>
           <Button size="sm" onClick={() => openDocument()}><Plus className="h-4 w-4" />Add document</Button>
         </CardHeader>
         <CardContent>
@@ -182,6 +188,7 @@ export default function NeoKnowledgePage() {
               <FileText className="h-4 w-4 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate font-medium">{doc.title}</span>
               <Badge variant="outline">{COLLECTIONS[doc.collection] || doc.collection}</Badge>
+              {unused.includes(doc.collection) && <Badge variant="outline" className="border-amber-500/60 text-amber-600">Not used by Neo</Badge>}
               <span className="text-xs text-muted-foreground">{doc.wordCount.toLocaleString()} words</span>
               <Button variant="ghost" size="icon" aria-label={`Edit ${doc.title}`} onClick={() => openDocument(doc)}><Pencil className="h-4 w-4" /></Button>
               <Button variant="ghost" size="icon" aria-label={`Delete ${doc.title}`} onClick={() => { if (window.confirm(`Remove "${doc.title}" from Neo's knowledge?`)) remove.mutate(doc.id); }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
@@ -242,7 +249,7 @@ export default function NeoKnowledgePage() {
         <form className="space-y-4" onSubmit={e => { e.preventDefault(); save.mutate(); }}>
           {editing?.kind === "document" && <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
             <div><Label htmlFor="neo-doc-title">Title</Label><Input id="neo-doc-title" required value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Inner Circle — Offer Stacking Call" /></div>
-            <div><Label>Collection</Label><Select value={collection} onValueChange={setCollection}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DOCUMENT_COLLECTIONS.map(c => <SelectItem key={c} value={c}>{COLLECTIONS[c]}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Collection</Label><Select value={collection} onValueChange={setCollection}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(ADDABLE_COLLECTIONS.includes(collection) ? ADDABLE_COLLECTIONS : [...ADDABLE_COLLECTIONS, collection]).map(c => <SelectItem key={c} value={c}>{COLLECTIONS[c]}</SelectItem>)}</SelectContent></Select></div>
           </div>}
           <div>
             <div className="flex items-center justify-between"><Label htmlFor="neo-text">Text</Label>

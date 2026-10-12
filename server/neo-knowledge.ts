@@ -152,13 +152,18 @@ export async function embeddingProgress(): Promise<{ total: number; embedded: nu
   return row;
 }
 
+// Neo only answers from his own trainings. YouTube and Instagram content mixes in podcast guests
+// and clips whose claims can't be verified, so anything filed there is never searched.
+export const UNUSED_COLLECTIONS = ["youtube", "instagram"] as const;
+
 type Hit = { chunkId: number; id: number; title: string; collection: string; category: string | null; content: string };
 
 // Best-matching passages this client may see: standalone documents, plus transcripts of
 // lessons that are shared with every client or assigned to this one (clientId null: every
 // lesson, for the admin search test). At most 2 passages per source.
 export async function searchKnowledge(question: string, clientId: number | null, limit = 6, embed: Embedder | null = openAIEmbedder()): Promise<NeoPassage[]> {
-  const visible = sql`(k.training_resource_id is null
+  const visible = sql`k.collection not in (${sql.join(UNUSED_COLLECTIONS.map(c => sql`${c}`), sql`, `)})
+    and (k.training_resource_id is null
     or (not r.archived and ${clientId === null ? sql`true` : sql`(r.is_global or ${clientId} = any(r.visible_client_ids))`}))`;
   const select = sql`select c.id as "chunkId", k.id, k.title, k.collection, r.category, c.content
     from neo_knowledge_chunks c
@@ -256,7 +261,7 @@ Write in the client's name and voice unless they ask for it as you. For promotio
 // The part of Neo's system prompt that carries Neo's own teaching.
 export function knowledgePrompt(passages: NeoPassage[], lessons: { title: string; category: string }[]): string {
   const parts = [`HOW TO USE YOUR TEACHING:
-The excerpts below are your own teaching: your Training Lab lessons, Inner Circle material, writing (books, guides, emails, plans) and YouTube and Instagram content. When they cover the question, answer from them in the first person, as things you teach and have lived: use your frameworks, stories, terminology, numbers and steps rather than generic marketing advice. Work the source in naturally, the way you'd mention it in conversation ("I break this down in my video *Why You Should Double Your Prices*", "go watch the *Masterclass Show-Up Processes* lesson in the Training Lab"); don't tack "(See Neo's video …)" onto the end of points, and don't cite a source for every point. Many of your YouTube videos are Circle of Greatness podcast interviews where your guest does most of the talking: credit a guest's story or advice to them ("when I had her on my podcast, she told me…"), not to yourself. Offers, prices and dates in emails and sales copy are from past campaigns: never quote them as current. If the excerpts don't cover something, give your best advice without making up a source. Never invent quotes or claim a lesson says something it doesn't.
+The excerpts below are your own teaching: your Training Lab lessons, Inner Circle material and writing (books, guides, emails, plans). When they cover the question, answer from them in the first person, as things you teach and have lived: use your frameworks, stories, terminology, numbers and steps rather than generic marketing advice. Work the source in naturally, the way you'd mention it in conversation ("I break this down in my video *Why You Should Double Your Prices*", "go watch the *Masterclass Show-Up Processes* lesson in the Training Lab"); don't tack "(See Neo's video …)" onto the end of points, and don't cite a source for every point. Many of your YouTube videos are Circle of Greatness podcast interviews where your guest does most of the talking: credit a guest's story or advice to them ("when I had her on my podcast, she told me…"), not to yourself. Offers, prices and dates in emails and sales copy are from past campaigns: never quote them as current. If the excerpts don't cover something, give your best advice without making up a source. Never invent quotes or claim a lesson says something it doesn't.
 The core curriculum (every Training Lab module except your Inner Circle) is what clients should watch first. Inner Circle recordings are older, supplementary material: when recommending lessons, point to the core curriculum first and suggest Inner Circle recordings only as extra depth, and if the two disagree, follow the core curriculum.`];
   if (lessons.length) {
     const byCategory = new Map<string, string[]>();
@@ -343,6 +348,7 @@ export function registerNeoKnowledgeRoutes(app: Express, getRequestUser: (req: a
         searchIndex: { ...(await embeddingProgress()), configured: !!process.env.OPENAI_API_KEY },
         lessons: lessons.map(l => ({ ...l, vimeo: !!vimeoVideoId(l.url), knowledge: byLesson.get(l.id) || null })),
         documents: withChunks.filter(d => !d.trainingResourceId),
+        unusedCollections: UNUSED_COLLECTIONS,
       });
     } catch { fail(res, 500, "Failed to load Neo's knowledge"); }
   });

@@ -66,12 +66,16 @@ test("Neo only finds transcripts of lessons the client can see", async () => {
     const doc = await saveKnowledge({ title: `Inner Circle doc ${marker}`, collection: "inner_circle", content: `The ${marker} framework.`, source: "pasted" });
     ids.push(doc.id);
 
-    const titles = async (clientId: number | null) => (await searchKnowledge(`what about ${marker}?`, clientId)).map(p => p.title).sort();
+    // YouTube content (podcast guests, unverified clips) is stored but never searched.
+    const video = await saveKnowledge({ title: `Podcast guest ${marker}`, collection: "youtube", content: `A guest claims ${marker} cures everything.`, source: "youtube" });
+    ids.push(video.id);
+
+    const titles = async (clientId: number | null) => (await searchKnowledge(`what about ${marker}?`, clientId, 6, null)).map(p => p.title).sort();
     assert.deepEqual(await titles(client), [`Inner Circle doc ${marker}`, `Shared ${marker}`]);
     assert.deepEqual(await titles(otherClient), [`Inner Circle doc ${marker}`, `Private ${marker}`, `Shared ${marker}`]);
     assert.deepEqual(await titles(null), [`Inner Circle doc ${marker}`, `Private ${marker}`, `Shared ${marker}`]);
     // A transcript of a lesson in the Inner Circle module is labelled as Inner Circle.
-    assert.equal((await searchKnowledge(marker, otherClient)).find(p => p.title.startsWith("Private"))?.collection, "inner_circle");
+    assert.equal((await searchKnowledge(marker, otherClient, 6, null)).find(p => p.title.startsWith("Private"))?.collection, "inner_circle");
 
     // Re-saving a lesson's transcript replaces it rather than adding a second copy.
     const resaved = await saveKnowledge({ title: lessons[0].title, collection: "training_lab", trainingResourceId: lessons[0].id, content: "Replaced text only.", source: "pasted" });
