@@ -214,20 +214,25 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 export function registerActivityRoutes(app: Express, getRequestUser: (req: any) => Promise<User | undefined>) {
   app.get("/api/activity", isAuthenticated, async (req: any, res) => {
-    const user = await getRequestUser(req);
-    if (!hasFullAccess(user)) return res.status(403).json({ error: "Only admins can view the activity log." });
-    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
-    const filters = [];
-    const clientId = Number(req.query.clientId);
-    if (Number.isSafeInteger(clientId) && clientId > 0) filters.push(eq(activityLog.clientId, clientId));
-    if (typeof req.query.userId === "string" && req.query.userId) filters.push(eq(activityLog.userId, req.query.userId));
-    const before = Number(req.query.before);
-    if (Number.isSafeInteger(before) && before > 0) filters.push(lt(activityLog.id, before));
-    const entries = await db.select().from(activityLog)
-      .where(filters.length ? and(...filters) : undefined)
-      .orderBy(desc(activityLog.id)).limit(limit);
-    const people = await db.selectDistinct({ userId: activityLog.userId, userName: activityLog.userName, userEmail: activityLog.userEmail })
-      .from(activityLog).orderBy(activityLog.userName);
-    res.json({ entries, people, hasMore: entries.length === limit });
+    try {
+      const user = await getRequestUser(req);
+      if (!hasFullAccess(user)) return res.status(403).json({ error: "Only admins can view the activity log." });
+      const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+      const filters = [];
+      const clientId = Number(req.query.clientId);
+      if (Number.isSafeInteger(clientId) && clientId > 0) filters.push(eq(activityLog.clientId, clientId));
+      if (typeof req.query.userId === "string" && req.query.userId) filters.push(eq(activityLog.userId, req.query.userId));
+      const before = Number(req.query.before);
+      if (Number.isSafeInteger(before) && before > 0) filters.push(lt(activityLog.id, before));
+      const entries = await db.select().from(activityLog)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(desc(activityLog.id)).limit(limit);
+      const people = await db.selectDistinct({ userId: activityLog.userId, userName: activityLog.userName, userEmail: activityLog.userEmail })
+        .from(activityLog).orderBy(activityLog.userName);
+      res.json({ entries, people, hasMore: entries.length === limit });
+    } catch (error) {
+      console.error("[activity] could not load:", error);
+      res.status(500).json({ error: "Could not load the activity log." });
+    }
   });
 }
