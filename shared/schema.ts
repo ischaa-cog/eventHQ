@@ -624,3 +624,25 @@ export const neoKnowledgeChunks = pgTable("neo_knowledge_chunks", {
   index("idx_neo_chunks_search").using("gin", table.search),
   index("idx_neo_chunks_embedding").using("hnsw", table.embedding.op("vector_cosine_ops")),
 ]);
+
+// Who changed what: one row per successful change made by a signed-in user.
+// Names are copied in so the history still reads correctly after a user or client is removed.
+export const activityLog = pgTable("activity_log", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id"),
+  userEmail: text("user_email"),
+  userName: text("user_name"),
+  userRole: text("user_role"),
+  clientId: integer("client_id"),
+  clientName: text("client_name"),
+  action: text("action").notNull(), // "Updated event", "Added calendar item", ...
+  item: text("item"), // the title or name of what was changed, when known
+  method: text("method").notNull(),
+  path: text("path").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("idx_activity_created").on(table.createdAt),
+  index("idx_activity_client").on(table.clientId, table.createdAt),
+  index("idx_activity_user").on(table.userId, table.createdAt),
+]);
+export type ActivityLogEntry = typeof activityLog.$inferSelect;

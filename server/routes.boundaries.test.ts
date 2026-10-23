@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
 import { eq, inArray } from "drizzle-orm";
-import { agencies, assets, clients, events, notificationRecipients, notifications, tuckChats, tuckMessages, users, webinarGoals, webinars } from "@shared/schema";
+import { activityLog, agencies, assets, clients, events, notificationRecipients, notifications, tuckChats, tuckMessages, users, webinarGoals, webinars } from "@shared/schema";
 import { db } from "./storage";
 import { registerApiRoutes } from "./routes";
 
@@ -275,6 +275,8 @@ test("API keeps client logins and events inside the user's tenant and rejects in
     if (webinarIds.length) await db.delete(webinars).where(inArray(webinars.id, webinarIds));
     if (assetIds.length) await db.delete(assets).where(inArray(assets.id, assetIds));
     if (eventIds.length) await db.delete(events).where(inArray(events.id, eventIds));
+    // Changes made by test users are logged; remove those rows with the users.
+    if (userIds.length) await db.delete(activityLog).where(inArray(activityLog.userId, userIds));
     if (userIds.length) await db.delete(users).where(inArray(users.id, userIds));
     if (clientIds.length) await db.delete(clients).where(inArray(clients.id, clientIds));
     if (agencyIds.length) await db.delete(agencies).where(inArray(agencies.id, agencyIds));

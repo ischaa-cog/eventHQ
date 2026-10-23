@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
 import { inArray } from "drizzle-orm";
-import {
+import { activityLog,
   agencies,
   clients,
   eventPerformance,
@@ -171,6 +171,8 @@ test("critical API workflows enforce tenant, role, metrics, and profile boundari
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (eventIds.length) await db.delete(eventPerformance).where(inArray(eventPerformance.id, eventIds));
+    // Changes made by test users are logged; remove those rows with the users.
+    if (userIds.length) await db.delete(activityLog).where(inArray(activityLog.userId, userIds));
     if (userIds.length) await db.delete(users).where(inArray(users.id, userIds));
     if (clientIds.length) await db.delete(clients).where(inArray(clients.id, clientIds));
     if (agencyIds.length) await db.delete(agencies).where(inArray(agencies.id, agencyIds));

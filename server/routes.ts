@@ -14,6 +14,7 @@ import { sendNotificationEmail } from "./email";
 import { passwordProblem } from "./passwords";
 import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "./googleCalendar";
 import { registerPortalRoutes } from "./portal-routes";
+import { activityLogger, registerActivityRoutes } from "./activity-log";
 import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
@@ -172,6 +173,8 @@ export async function registerRoutes(
 
 // Kept separate so API behavior can be exercised with isolated test authentication.
 export function registerApiRoutes(app: Express): void {
+  // Record who changes what (see server/activity-log.ts).
+  app.use("/api", activityLogger(getRequestUser));
   // Agency clients use the client portal only. Keep this allowlist explicit so
   // hidden setup, profile, asset-management, and staff APIs cannot be reached by
   // calling them directly. Each client-scoped handler still enforces assignment.
@@ -2969,4 +2972,5 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
 
   registerPortalRoutes(app, getRequestUser, canAccessClient);
   registerNeoKnowledgeRoutes(app, getRequestUser);
+  registerActivityRoutes(app, getRequestUser);
 }

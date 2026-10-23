@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
 import { eq, inArray } from "drizzle-orm";
-import { agencies, calendarEntries, clients, eventPerformance, users, webinars } from "@shared/schema";
+import { activityLog, agencies, calendarEntries, clients, eventPerformance, users, webinars } from "@shared/schema";
 import { db } from "./storage";
 import { registerApiRoutes } from "./routes";
 import { getPostLoginRedirect, loginPortalMismatch } from "./auth";
@@ -170,6 +170,8 @@ test("team members work only in their assigned workspaces and cannot use admin a
     if (clientIds.length) await db.delete(calendarEntries).where(inArray(calendarEntries.clientId, clientIds));
     if (clientIds.length) await db.delete(eventPerformance).where(inArray(eventPerformance.clientId, clientIds));
     if (clientIds.length) await db.delete(webinars).where(inArray(webinars.clientId, clientIds));
+    // Changes made by test users are logged; remove those rows with the users.
+    if (userIds.length) await db.delete(activityLog).where(inArray(activityLog.userId, userIds));
     if (userIds.length) await db.delete(users).where(inArray(users.id, userIds));
     if (clientIds.length) await db.delete(clients).where(inArray(clients.id, clientIds));
     if (agencyIds.length) await db.delete(agencies).where(inArray(agencies.id, agencyIds));

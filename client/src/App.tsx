@@ -22,6 +22,7 @@ import MarketingCalendarPage from "@/pages/marketing-calendar";
 import NotificationsPage from "@/pages/notifications";
 import SendNotificationsPage from "@/pages/send-notifications";
 import NeoKnowledgePage from "@/pages/neo-knowledge";
+import ActivityLogPage from "@/pages/activity-log";
 import ClientNotificationsPage from "@/pages/client-notifications";
 import ClientOnboardingPage from "@/pages/client-onboarding";
 import AccessDeniedPage from "@/pages/access-denied";
@@ -190,6 +191,7 @@ function Router() {
       <Route path="/notifications" component={() => <InternalOnlyFeature><NotificationsPage /></InternalOnlyFeature>} />
       <Route path="/send-notifications" component={() => <AdminOnlyFeature><SendNotificationsPage /></AdminOnlyFeature>} />
       <Route path="/neo-knowledge" component={() => <AdminOnlyFeature><NeoKnowledgePage /></AdminOnlyFeature>} />
+      <Route path="/activity" component={() => <AdminOnlyFeature><ActivityLogPage /></AdminOnlyFeature>} />
       <Route path="/admin" component={() => <AdminOnlyFeature><AdminPage /></AdminOnlyFeature>} />
 
       {/* Client workspaces */}
