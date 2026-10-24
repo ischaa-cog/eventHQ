@@ -94,31 +94,6 @@ interface EventPerformance {
   dayStats?: DayStat[];
 }
 
-interface HistoricalWebinar {
-  id: number;
-  clientId: number;
-  title: string;
-  date: string;
-  webinarType: string;
-  totalRegistrants: number;
-  totalAttendees: number;
-  peopleAtPitch: number;
-  masterclassUpsells: number;
-  masterclassDownsells: number;
-  masterclassUpsellPrice: string;
-  masterclassDownsellPrice: string;
-  challengeTicketsGa: number;
-  challengeTicketsVip: number;
-  challengeTicketsPlatinum: number;
-  challengeTicketsDiamond: number;
-  ticketPriceGa: string;
-  ticketPriceVip: string;
-  ticketPricePlatinum: string;
-  ticketPriceDiamond: string;
-  adSpend: string;
-  notes: string | null;
-}
-
 interface WebinarGoal {
   id: number;
   clientId: number;
@@ -244,39 +219,6 @@ function calculateMetrics(event: EventPerformance | EventFormData) {
   };
 }
 
-function calculateHistoricalWebinarMetrics(webinar: HistoricalWebinar) {
-  const registrants = Number(webinar.totalRegistrants) || 0;
-  const attendees = Number(webinar.totalAttendees) || 0;
-  const adSpend = parseFloat(webinar.adSpend) || 0;
-  const tickets = [
-    { count: webinar.challengeTicketsGa, price: webinar.ticketPriceGa, defaultPrice: 97 },
-    { count: webinar.challengeTicketsVip, price: webinar.ticketPriceVip, defaultPrice: 297 },
-    { count: webinar.challengeTicketsPlatinum, price: webinar.ticketPricePlatinum, defaultPrice: 997 },
-    { count: webinar.challengeTicketsDiamond, price: webinar.ticketPriceDiamond, defaultPrice: 2997 },
-  ];
-  const totalTickets = tickets.reduce((sum, ticket) => sum + (Number(ticket.count) || 0), 0);
-  const ticketRevenue = tickets.reduce((sum, ticket) => {
-    const price = parseFloat(ticket.price) || ticket.defaultPrice;
-    return sum + (Number(ticket.count) || 0) * price;
-  }, 0);
-  const upsellRevenue = (Number(webinar.masterclassUpsells) || 0) * (parseFloat(webinar.masterclassUpsellPrice) || 47);
-  const downsellRevenue = (Number(webinar.masterclassDownsells) || 0) * (parseFloat(webinar.masterclassDownsellPrice) || 27);
-  const revenue = ticketRevenue + upsellRevenue + downsellRevenue;
-  return {
-    totalTickets,
-    revenue,
-    adSpend,
-    attendeeRate: registrants > 0 ? (attendees / registrants) * 100 : null,
-    closingRate: attendees > 0 ? (totalTickets / attendees) * 100 : 0,
-    roas: adSpend > 0 ? revenue / adSpend : null,
-    costPerAttendee: attendees > 0 ? adSpend / attendees : null,
-    costPerTicket: totalTickets > 0 ? adSpend / totalTickets : null,
-    ticketRevenue,
-    upsellRevenue,
-    downsellRevenue,
-  };
-}
-
 export default function EventTrackerPage() {
   const { id: clientId } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
@@ -313,20 +255,6 @@ export default function EventTrackerPage() {
     queryFn: async () => {
       const res = await fetch(`/api/clients/${clientId}/event-performance`);
       if (!res.ok) throw new Error("Failed to fetch events");
-      return res.json();
-    },
-    enabled: !!clientId,
-  });
-
-  const {
-    data: historicalWebinars = [],
-    isLoading: isLoadingHistoricalWebinars,
-    isError: isHistoricalWebinarsError,
-  } = useQuery<HistoricalWebinar[]>({
-    queryKey: [`/api/clients/${clientId}/webinars`],
-    queryFn: async () => {
-      const res = await fetch(`/api/clients/${clientId}/webinars`);
-      if (!res.ok) throw new Error("Failed to fetch historical masterclasses");
       return res.json();
     },
     enabled: !!clientId,
@@ -649,38 +577,6 @@ export default function EventTrackerPage() {
   const overallRoas = aggregatedMetrics.totalAdSpend > 0
     ? aggregatedMetrics.totalRevenue / aggregatedMetrics.totalAdSpend : null;
   const totalProfit = aggregatedMetrics.totalRevenue - aggregatedMetrics.totalAdSpend;
-
-  const historicalWebinarMetrics = historicalWebinars.reduce((acc, webinar) => {
-    const metrics = calculateHistoricalWebinarMetrics(webinar);
-    return {
-      totalWebinars: acc.totalWebinars + 1,
-      totalRegistrants: acc.totalRegistrants + (Number(webinar.totalRegistrants) || 0),
-      totalAttendees: acc.totalAttendees + (Number(webinar.totalAttendees) || 0),
-      totalTickets: acc.totalTickets + metrics.totalTickets,
-      totalRevenue: acc.totalRevenue + metrics.revenue,
-      totalAdSpend: acc.totalAdSpend + metrics.adSpend,
-      attendeeRateSum: acc.attendeeRateSum + (metrics.attendeeRate || 0),
-      closingRateSum: acc.closingRateSum + metrics.closingRate,
-    };
-  }, {
-    totalWebinars: 0,
-    totalRegistrants: 0,
-    totalAttendees: 0,
-    totalTickets: 0,
-    totalRevenue: 0,
-    totalAdSpend: 0,
-    attendeeRateSum: 0,
-    closingRateSum: 0,
-  });
-  const historicalAvgAttendeeRate = historicalWebinarMetrics.totalWebinars
-    ? historicalWebinarMetrics.attendeeRateSum / historicalWebinarMetrics.totalWebinars
-    : 0;
-  const historicalAvgClosingRate = historicalWebinarMetrics.totalWebinars
-    ? historicalWebinarMetrics.closingRateSum / historicalWebinarMetrics.totalWebinars
-    : 0;
-  const historicalRoas = historicalWebinarMetrics.totalAdSpend > 0
-    ? historicalWebinarMetrics.totalRevenue / historicalWebinarMetrics.totalAdSpend
-    : 0;
 
   const masterclassEvents = events.filter(e => e.eventType === "webinar").filter(isEventInDateRange);
   const masterclassTotals = masterclassEvents.reduce((acc, e) => {
@@ -1186,7 +1082,7 @@ export default function EventTrackerPage() {
             </CardContent>
           </Card>
 
-          {/* Masterclass goals and legacy history only apply to the Masterclasses tab. */}
+          {/* Masterclass goals only apply to the Masterclasses tab. */}
           {activeTab === "webinar" && (
             <div className="mt-8">
               <MasterclassGoalsCard
@@ -1197,134 +1093,6 @@ export default function EventTrackerPage() {
                 canEdit={canManageActuals}
               />
 
-              {/* Legacy masterclass records remain available here as read-only history. */}
-              <section className="mb-8 space-y-4" aria-labelledby="historical-masterclasses-heading">
-                <div>
-                  <h2 id="historical-masterclasses-heading" className="text-xl font-semibold text-white">Historical Masterclass Reporting</h2>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Legacy masterclass records and sales breakdowns from the old Masterclass Tracker. These are shown separately from Event Tracker actuals.
-                  </p>
-                </div>
-                {isHistoricalWebinarsError ? (
-                  <Card className="bg-gray-900 border-gray-800">
-                    <CardContent className="p-6 text-center text-red-400">
-                      Unable to load historical masterclasses. Please try again.
-                    </CardContent>
-                  </Card>
-                ) : isLoadingHistoricalWebinars ? (
-                  <Card className="bg-gray-900 border-gray-800">
-                    <CardContent className="p-6 text-center text-gray-400">Loading historical masterclasses...</CardContent>
-                  </Card>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                      {[
-                        { label: "Masterclasses", value: historicalWebinarMetrics.totalWebinars.toLocaleString() },
-                        { label: "Registrants", value: historicalWebinarMetrics.totalRegistrants.toLocaleString() },
-                        { label: "Attendees", value: historicalWebinarMetrics.totalAttendees.toLocaleString() },
-                        { label: "Tickets Sold", value: historicalWebinarMetrics.totalTickets.toLocaleString() },
-                        { label: "Legacy Revenue", value: `$${historicalWebinarMetrics.totalRevenue.toLocaleString()}` },
-                        { label: "Ad Spend", value: `$${historicalWebinarMetrics.totalAdSpend.toLocaleString()}` },
-                        { label: "Avg Attendee Rate", value: `${historicalAvgAttendeeRate.toFixed(1)}%` },
-                        { label: "Avg Closing Rate", value: `${historicalAvgClosingRate.toFixed(1)}%` },
-                        { label: "Overall ROAS", value: `${historicalRoas.toFixed(2)}x` },
-                      ].map((metric) => (
-                        <Card key={metric.label} className="bg-gray-900 border-gray-800">
-                          <CardContent className="p-3">
-                            <p className="text-xs text-gray-400">{metric.label}</p>
-                            <p className="mt-1 text-lg font-semibold text-white">{metric.value}</p>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-
-                    <Card className="bg-gray-900 border-gray-800">
-                      <CardHeader>
-                        <CardTitle className="text-white">Historical Masterclass Records ({historicalWebinars.length})</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        {historicalWebinars.length === 0 ? (
-                          <div className="p-6 text-center text-gray-400">No historical masterclass records found.</div>
-                        ) : (
-                          <div className="overflow-x-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow className="border-gray-800">
-                                  <TableHead className="text-gray-400">Date / Masterclass</TableHead>
-                                  <TableHead className="text-gray-400">Format</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Registrants</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Attendees</TableHead>
-                                  <TableHead className="text-gray-400 text-right">At Pitch</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Attendee %</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Ticket Tiers (quantity)</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Ticket / Upsell / Downsell Prices</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Tickets</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Upsells / Downsells</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Revenue (tickets / upsells / downsells)</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Ad Spend</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Closing Rate</TableHead>
-                                  <TableHead className="text-gray-400 text-right">ROAS</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Cost / Attendee</TableHead>
-                                  <TableHead className="text-gray-400 text-right">Cost / Ticket</TableHead>
-                                  {showInternalNotes && <TableHead className="text-gray-400">Notes</TableHead>}
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {[...historicalWebinars]
-                                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                  .map((webinar) => {
-                                    const metrics = calculateHistoricalWebinarMetrics(webinar);
-                                    const currency = (value: number) => `$${value.toLocaleString()}`;
-                                    return (
-                                      <TableRow key={webinar.id} className="border-gray-800 align-top">
-                                        <TableCell className="min-w-[190px] text-white">
-                                          <div>{webinar.title || "Untitled masterclass"}</div>
-                                          <div className="mt-1 text-xs text-gray-400">
-                                            {format(new Date(webinar.date), "MMM d, yyyy")}
-                                          </div>
-                                        </TableCell>
-                                        <TableCell className="text-gray-300">{webinar.webinarType || "—"}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{Number(webinar.totalRegistrants) || 0}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{Number(webinar.totalAttendees) || 0}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{Number(webinar.peopleAtPitch) || 0}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{metrics.attendeeRate === null ? "N/A" : `${metrics.attendeeRate.toFixed(1)}%`}</TableCell>
-                                        <TableCell className="text-right text-gray-300">
-                                          GA {Number(webinar.challengeTicketsGa) || 0} / VIP {Number(webinar.challengeTicketsVip) || 0} / Platinum {Number(webinar.challengeTicketsPlatinum) || 0} / Diamond {Number(webinar.challengeTicketsDiamond) || 0}
-                                        </TableCell>
-                                        <TableCell className="min-w-[190px] text-right text-gray-300">
-                                          {currency(parseFloat(webinar.ticketPriceGa) || 97)} / {currency(parseFloat(webinar.ticketPriceVip) || 297)} / {currency(parseFloat(webinar.ticketPricePlatinum) || 997)} / {currency(parseFloat(webinar.ticketPriceDiamond) || 2997)}
-                                          <div className="text-xs text-gray-500">
-                                            Upsell {currency(parseFloat(webinar.masterclassUpsellPrice) || 47)} / Downsell {currency(parseFloat(webinar.masterclassDownsellPrice) || 27)}
-                                          </div>
-                                        </TableCell>
-                                        <TableCell className="text-right text-gray-300">{metrics.totalTickets}</TableCell>
-                                        <TableCell className="text-right text-gray-300">
-                                          {Number(webinar.masterclassUpsells) || 0} / {Number(webinar.masterclassDownsells) || 0}
-                                        </TableCell>
-                                        <TableCell className="min-w-[190px] text-right text-green-400">
-                                          {currency(metrics.revenue)}
-                                          <div className="text-xs text-gray-500">
-                                            {currency(metrics.ticketRevenue)} / {currency(metrics.upsellRevenue)} / {currency(metrics.downsellRevenue)}
-                                          </div>
-                                        </TableCell>
-                                        <TableCell className="text-right text-gray-300">{currency(metrics.adSpend)}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{metrics.closingRate.toFixed(1)}%</TableCell>
-                                        <TableCell className="text-right text-yellow-400">{metrics.roas === null ? "N/A" : `${metrics.roas.toFixed(2)}x`}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{metrics.costPerAttendee === null ? "N/A" : currency(metrics.costPerAttendee)}</TableCell>
-                                        <TableCell className="text-right text-gray-300">{metrics.costPerTicket === null ? "N/A" : currency(metrics.costPerTicket)}</TableCell>
-                                        {showInternalNotes && <TableCell className="min-w-[180px] whitespace-pre-wrap text-gray-400">{webinar.notes || "—"}</TableCell>}
-                                      </TableRow>
-                                    );
-                                  })}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </>
-                )}
-              </section>
             </div>
           )}
         </div>
