@@ -3,7 +3,8 @@ import { and, asc, desc, eq, gte, ilike, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { isAuthenticated } from "./auth";
 import { db } from "./storage";
-import { getGoogleCalendarClient } from "./googleCalendar";
+import { describeGoogleCalendarError, getGoogleCalendarClient, googleServiceAccountEmail, isGoogleCalendarConfigured } from "./googleCalendar";
+import { refreshCalendarIfStale, syncClientCalendar } from "./calendar-sync";
 import { netSaleContribution } from "./sales-math";
 import { BULK_TRAINING_MAX_ROWS } from "@shared/training-bulk";
 import { hasFullAccess } from "@shared/roles";
@@ -32,8 +33,16 @@ const projectionInput = z.object({
   averageSaleValue: z.coerce.number().finite().min(0),
 });
 // Accepts a raw Calendar ID, a Google Calendar embed/public URL, or the full <iframe> snippet.
-const normalizeCalendarId = (input: string) => {
+const decodeCalendarB64 = (value: string) => {
+  const decoded = Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+  return /^[^\s@]+@[^\s@]+$/.test(decoded) ? decoded : null;
+};
+export const normalizeCalendarId = (input: string) => {
   let value = input.trim();
+  // A calendar's settings page link (…/settings/calendar/<base64 id>) names the calendar in its path.
+  // Any cid= on it is left over from whichever calendar was open before, so the path wins.
+  const settings = value.match(/\/settings\/calendar\/([A-Za-z0-9_-]+)/);
+  if (settings) return decodeCalendarB64(settings[1]);
   const src = value.match(/[?&](?:src|cid)=([^&"'\s>]+)/);
   if (src) {
     try { value = decodeURIComponent(src[1]); } catch { return null; }
@@ -176,10 +185,13 @@ export function registerPortalRoutes(
 
   app.get("/api/clients/:id/calendar/connection", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
+    // Admins need the service account's email: it's what each calendar has to be shared with.
+    const isAdmin = admin(await getRequestUser(req));
+    const serviceAccountEmail = isAdmin ? googleServiceAccountEmail() : null;
+    const configured = isGoogleCalendarConfigured();
     const row = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId)))[0];
-    if (!row) return res.json({ calendarId: null, lastSuccessfulSync: null, error: null, connected: false });
-    // The API connector only exists on Replit; elsewhere the calendar is shown via Google's embed.
-    if (!process.env.REPLIT_CONNECTORS_HOSTNAME) return res.json({ calendarId: row.calendarId, lastSuccessfulSync: row.lastSuccessfulSync, error: null, connected: false });
+    if (!row) return res.json({ calendarId: null, lastSuccessfulSync: null, error: null, connected: false, configured, serviceAccountEmail });
+    if (!configured) return res.json({ calendarId: row.calendarId, lastSuccessfulSync: row.lastSuccessfulSync, error: isAdmin ? "Google Calendar isn't set up on the server yet." : null, connected: false, configured, serviceAccountEmail });
     let connected = false;
     try {
       const calendar = await getGoogleCalendarClient();
@@ -190,11 +202,11 @@ export function registerPortalRoutes(
         row.error = null;
       }
     } catch (e: any) {
-      const error = e?.message || "Google Calendar is not connected";
+      const error = describeGoogleCalendarError(e);
       if (row.error !== error && !(req.user as any)?.demoLogin) await db.update(clientCalendarConnections).set({ error }).where(eq(clientCalendarConnections.clientId, clientId));
       row.error = error;
     }
-    res.json({ calendarId: row.calendarId, lastSuccessfulSync: row.lastSuccessfulSync, error: row.error, connected });
+    res.json({ calendarId: row.calendarId, lastSuccessfulSync: row.lastSuccessfulSync, error: row.error, connected, configured, serviceAccountEmail });
   });
   app.patch("/api/clients/:id/calendar/connection", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
@@ -215,28 +227,10 @@ export function registerPortalRoutes(
   app.post("/api/clients/:id/calendar/sync", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
     if (!hasFullAccess(await getRequestUser(req))) return fail(res, 403, "Only admins can synchronize the shared Google Calendar connector");
-    const connection = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId)))[0];
-    if (!connection) return fail(res, 409, "Calendar is not configured");
     try {
-      const calendar = await getGoogleCalendarClient(); const now = new Date(); const from = new Date(now); from.setDate(from.getDate() - 30); const to = new Date(now); to.setDate(to.getDate() + 180);
-      let pageToken: string | undefined;
-      do {
-        const result = await calendar.events.list({ calendarId: connection.calendarId, timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, showDeleted: true, orderBy: "startTime", maxResults: 250, pageToken });
-        for (const e of result.data.items || []) {
-        if (!e.id) continue;
-        const syncKey = `${connection.calendarId}:${e.id}`;
-        if (e.status === "cancelled") {
-          await db.delete(calendarEntries).where(and(eq(calendarEntries.clientId, clientId), eq(calendarEntries.googleSyncKey, syncKey)));
-          continue;
-        }
-        const start = e.start?.dateTime || e.start?.date; const end = e.end?.dateTime || e.end?.date; const eventDate = validDate(start); if (!eventDate) continue;
-        const data: any = { clientId, title: e.summary || "(untitled)", eventDate, endDate: validDate(end), timezone: e.start?.timeZone || "UTC", eventLink: e.htmlLink || null, description: e.description || null, attendeeEmails: (e.attendees || []).map(a => a.email).filter(Boolean), googleEventId: e.id, googleCalendarId: connection.calendarId, googleSyncKey: `${connection.calendarId}:${e.id}` };
-        await db.insert(calendarEntries).values(data).onConflictDoUpdate({ target: [calendarEntries.clientId, calendarEntries.googleSyncKey], set: { ...data, updatedAt: new Date() } });
-        }
-        pageToken = result.data.nextPageToken || undefined;
-      } while (pageToken);
-      await db.update(clientCalendarConnections).set({ lastSuccessfulSync: new Date(), error: null }).where(eq(clientCalendarConnections.clientId, clientId)); res.json({ success: true, lastSuccessfulSync: new Date() });
-    } catch (e: any) { const message = e?.message || "Google Calendar is not connected"; await db.update(clientCalendarConnections).set({ error: message }).where(eq(clientCalendarConnections.clientId, clientId)); fail(res, 502, message); }
+      const result = await syncClientCalendar(clientId);
+      res.json({ success: true, ...result, lastSuccessfulSync: new Date() });
+    } catch (e: any) { fail(res, e?.message === "Calendar is not configured" ? 409 : 502, e?.message || "Google Calendar sync failed"); }
   });
 
   app.get("/api/clients/:id/sales/sources", isAuthenticated, async (req: any, res) => {
@@ -280,6 +274,8 @@ export function registerPortalRoutes(
   app.get("/api/clients/:id/portal-summary", isAuthenticated, async (req: any, res) => {
     const clientId = idOf(req.params.id); if (!(await guard(req, res, clientId))) return;
     const start = req.query.startDate ? validDate(req.query.startDate) : new Date(Date.now() - 30 * 86400000); const end = req.query.endDate ? validDate(req.query.endDate) : new Date(); if (!start || !end || start > end || end.getTime() - start.getTime() > 366 * 86400000) return fail(res, 400, "Select a valid range of at most one year");
+    // Upcoming calendar items come from Google; refresh them first if they're stale.
+    if (!req.user?.demoLogin) await refreshCalendarIfStale(clientId);
     const period = and(eq(sales.clientId, clientId), gte(sales.saleDate, start), lte(sales.saleDate, end));
     const [saleRows, upcoming, events, conn, sources, client] = await Promise.all([db.select().from(sales).where(period).orderBy(desc(sales.saleDate)), db.select().from(calendarEntries).where(and(eq(calendarEntries.clientId, clientId), gte(calendarEntries.eventDate, new Date()))).orderBy(asc(calendarEntries.eventDate)).limit(10), db.select().from(eventPerformance).where(eq(eventPerformance.clientId, clientId)).orderBy(desc(eventPerformance.startDate)).limit(10), db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId)), db.select().from(salesSources).where(eq(salesSources.clientId, clientId)), db.select({ googleDriveFolderId: clients.googleDriveFolderId }).from(clients).where(eq(clients.id, clientId))]);
     const revenue = saleRows.reduce((n, s) => n + netSaleContribution(s), 0);

@@ -144,8 +144,13 @@ test("portal enforces client boundaries and keeps imported revenue idempotent", 
     assert.equal(connection.status, 200);
     assert.equal(connection.body.calendarId, "nonexistent-test-calendar");
     assert.equal(connection.body.connected, false);
-    if (process.env.REPLIT_CONNECTORS_HOSTNAME) assert.ok(connection.body.error);
-    else assert.equal(connection.body.error, null);
+    // With Google set up the bad ID fails to open; without it, the status says Google isn't set up.
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.REPLIT_CONNECTORS_HOSTNAME) assert.ok(connection.body.error);
+    else {
+      assert.equal(connection.body.error, null); // clients aren't shown server setup problems
+      assert.match((await request(owner, `${pathA}/calendar/connection`)).body.error, /isn't set up on the server/);
+    }
+    assert.equal(connection.body.serviceAccountEmail, null); // only admins are shown it
     assert.equal((await request(adminB, `${pathA}/calendar/sync`, "POST")).status, 403);
     assert.equal((await request(owner, `${pathA}/calendar/connection`, "PATCH", { calendarId: null })).status, 200);
 

@@ -65,13 +65,16 @@ export default function MarketingCalendarPage() {
   const { data: entries = [], isLoading } = useQuery<CalendarEntry[]>({
     queryKey: [`/api/clients/${clientId}/calendar`],
     enabled: !!clientId,
+    // The server re-syncs from Google when its copy is over 5 minutes old, so poll for changes.
+    refetchInterval: 2 * 60 * 1000,
   });
   const connectionQuery = useQuery({
     queryKey: [`/api/clients/${clientId}/calendar/connection`],
     enabled: !!clientId,
+    refetchInterval: 2 * 60 * 1000,
   });
   const rawConnection = connectionQuery.data;
-  const connection = rawConnection as { calendarId: string | null; lastSuccessfulSync: string | null; error: string | null; connected: boolean } | undefined;
+  const connection = rawConnection as { calendarId: string | null; lastSuccessfulSync: string | null; error: string | null; connected: boolean; configured?: boolean; serviceAccountEmail?: string | null } | undefined;
   useEffect(() => { if (connection) setCalendarId(connection.calendarId || ""); }, [connection?.calendarId]);
   const googleCalendarId = connection?.calendarId || null;
   const connectionMutation = useMutation({
@@ -336,8 +339,8 @@ export default function MarketingCalendarPage() {
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-2 text-sm">
-              <span className={googleCalendarId ? "text-green-600" : "text-muted-foreground"}>
-                {connectionQuery.isError ? "Connection status unavailable" : googleCalendarId ? "Google Calendar linked" : "Google Calendar not linked"}
+              <span className={connection?.connected ? "text-green-600" : googleCalendarId ? "text-amber-600" : "text-muted-foreground"}>
+                {connectionQuery.isError ? "Connection status unavailable" : connection?.connected ? "Synced with Google Calendar" : googleCalendarId ? "Google Calendar linked, not syncing" : "Google Calendar not linked"}
               </span>
               {connection?.lastSuccessfulSync && <span className="text-muted-foreground">Last sync {format(new Date(connection.lastSuccessfulSync), "MMM d, h:mm a")}</span>}
               {canConfigure && <><Button variant="outline" size="sm" onClick={() => setConfigOpen(true)}><Settings className="h-4 w-4 mr-1" />Configure</Button>{connection?.connected && <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}><RefreshCw className="h-4 w-4 mr-1" />Sync</Button>}</>}
@@ -814,10 +817,13 @@ export default function MarketingCalendarPage() {
             <form className="space-y-4" onSubmit={e => { e.preventDefault(); connectionMutation.mutate(); }}>
               <div className="space-y-2"><Label htmlFor="calendar-id">Google Calendar ID or embed link</Label><Input id="calendar-id" value={calendarId} onChange={e => setCalendarId(e.target.value)} placeholder="abc123@group.calendar.google.com" data-testid="input-calendar-id" /><p className="text-xs text-muted-foreground">Leave blank to unlink this client's calendar.</p></div>
               <ol className="list-decimal pl-5 text-xs text-muted-foreground space-y-1">
-                <li>In Google Calendar, open Settings, pick this client's calendar, then scroll to <span className="font-medium">Integrate calendar</span> and copy the Calendar ID (or the embed code).</li>
-                <li>Under <span className="font-medium">Share with specific people</span>, add the client's Google email so they can see events.</li>
-                <li>Paste the ID or embed code above and save.</li>
+                <li>In Google Calendar, open Settings, pick this client's calendar, then scroll to <span className="font-medium">Integrate calendar</span> and copy the Calendar ID (or the embed code, or the settings page link).</li>
+                <li>Under <span className="font-medium">Share with specific people or groups</span>, add {connection?.serviceAccountEmail
+                  ? <><span className="font-medium break-all text-foreground">{connection.serviceAccountEmail}</span> with <span className="font-medium">Make changes to events</span></>
+                  : "EventHQ's Google service account (shown here once it's set up on the server)"}. That lets EventHQ read the calendar and add events to it.</li>
+                <li>Paste the ID above and save. Events sync automatically every few minutes; Sync pulls them in right away.</li>
               </ol>
+              {connection && connection.configured === false && <p className="text-sm text-amber-600">Google Calendar isn't set up on the server yet, so nothing syncs. An admin needs to add the GOOGLE_SERVICE_ACCOUNT_KEY setting in Vercel.</p>}
               {connection?.error && <p className="text-sm text-destructive">{connection.error}</p>}
               {connectionMutation.isError && <p className="text-sm text-destructive">Could not save the calendar connection.</p>}
               <DialogFooter><Button type="submit" disabled={connectionMutation.isPending}>{connectionMutation.isPending ? "Saving…" : "Save connection"}</Button></DialogFooter>

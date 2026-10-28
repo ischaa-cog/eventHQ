@@ -12,7 +12,8 @@ import { runAssetGeneration, runTemplateBasedGeneration, getAvailableTemplatesFo
 import { getAuthorizationUrl, exchangeCodeForTokens, ensureClientFolder } from "./google-drive";
 import { sendNotificationEmail } from "./email";
 import { passwordProblem } from "./passwords";
-import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "./googleCalendar";
+import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent, isGoogleCalendarConfigured } from "./googleCalendar";
+import { refreshCalendarIfStale } from "./calendar-sync";
 import { registerPortalRoutes } from "./portal-routes";
 import { activityLogger, registerActivityRoutes } from "./activity-log";
 import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
@@ -2263,6 +2264,8 @@ export function registerApiRoutes(app: Express): void {
         return forbidden(res);
       }
       
+      // Pull recent changes from the client's Google Calendar first (only when the last sync is stale).
+      if (!req.user?.demoLogin) await refreshCalendarIfStale(clientId);
       const entries = await storage.getCalendarEntries(clientId);
       res.json(entries);
     } catch (error: any) {
@@ -2270,6 +2273,8 @@ export function registerApiRoutes(app: Express): void {
       res.status(500).json({ error: error.message || "Failed to fetch calendar entries" });
     }
   });
+
+  const INVITES_SKIPPED = "Saved to Google Calendar, but invites weren't emailed: Google only lets EventHQ invite guests once domain-wide delegation is turned on.";
 
   // Calendar entry CRUD and connector setup are agency-staff operations.
   app.post("/api/clients/:clientId/calendar", isAuthenticated, async (req: any, res) => {
@@ -2317,22 +2322,22 @@ export function registerApiRoutes(app: Express): void {
         googleEventId: null,
       });
       const connection = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, clientId)))[0];
-      if (!connection) return res.status(201).json(entry);
-      const googleEventId = await createGoogleCalendarEvent({
+      if (!connection || !isGoogleCalendarConfigured()) return res.status(201).json(entry);
+      const created = await createGoogleCalendarEvent({
         title: entry.title, description: entry.description, eventDate: entry.eventDate,
         endDate: entry.endDate, timezone: entry.timezone,
         attendeeEmails: entry.attendeeEmails ?? [], eventLink: entry.eventLink,
       }, connection.calendarId);
-      if (!googleEventId) {
-        await db.update(clientCalendarConnections).set({ error: "Failed to create Google Calendar event" }).where(eq(clientCalendarConnections.clientId, clientId));
-        return res.status(201).json({ ...entry, syncError: "Saved locally, but Google Calendar sync failed." });
+      if (!created.ok || !created.eventId) {
+        await db.update(clientCalendarConnections).set({ error: created.error || "Failed to create Google Calendar event" }).where(eq(clientCalendarConnections.clientId, clientId));
+        return res.status(201).json({ ...entry, syncError: `Saved in EventHQ, but not added to Google Calendar: ${created.error || "sync failed"}` });
       }
       const updated = await storage.updateCalendarEntry(entry.id, {
-        googleEventId, googleCalendarId: connection.calendarId,
-        googleSyncKey: `${connection.calendarId}:${googleEventId}`,
+        googleEventId: created.eventId, googleCalendarId: connection.calendarId,
+        googleSyncKey: `${connection.calendarId}:${created.eventId}`,
       });
       await db.update(clientCalendarConnections).set({ error: null }).where(eq(clientCalendarConnections.clientId, clientId));
-      res.status(201).json(updated);
+      res.status(201).json(created.invitesSkipped ? { ...updated, syncError: INVITES_SKIPPED } : updated);
     } catch (error: any) {
       console.error("Error creating calendar entry:", error);
       res.status(500).json({ error: error.message || "Failed to create calendar entry" });
@@ -2389,7 +2394,7 @@ export function registerApiRoutes(app: Express): void {
       }
       const updated = await storage.updateCalendarEntry(entryId, updateData);
       const connection = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, existing.clientId)))[0];
-      if (!connection || !updated) return res.json(updated);
+      if (!connection || !updated || !isGoogleCalendarConfigured()) return res.json(updated);
       const eventData = {
         title: updated.title, description: updated.description,
         eventDate: updated.eventDate, endDate: updated.endDate,
@@ -2397,24 +2402,23 @@ export function registerApiRoutes(app: Express): void {
         eventLink: updated.eventLink,
       };
       const sameCalendar = updated.googleCalendarId === connection.calendarId;
-      const synced = sameCalendar && updated.googleEventId
+      // Update the Google copy, or create one if this entry isn't on the connected calendar yet.
+      const write = sameCalendar && updated.googleEventId
         ? await updateGoogleCalendarEvent(updated.googleEventId, eventData, connection.calendarId)
-        : false;
-      if (!synced) {
-        const googleEventId = sameCalendar && updated.googleEventId ? null
-          : await createGoogleCalendarEvent(eventData, connection.calendarId);
-        if (googleEventId) {
-          await storage.updateCalendarEntry(entryId, {
-            googleEventId, googleCalendarId: connection.calendarId,
-            googleSyncKey: `${connection.calendarId}:${googleEventId}`,
-          });
-        } else {
-          await db.update(clientCalendarConnections).set({ error: "Failed to update Google Calendar event" }).where(eq(clientCalendarConnections.clientId, existing.clientId));
-          return res.json({ ...updated, syncError: "Saved locally, but Google Calendar sync failed." });
-        }
+        : await createGoogleCalendarEvent(eventData, connection.calendarId);
+      if (!write.ok || !write.eventId) {
+        await db.update(clientCalendarConnections).set({ error: write.error || "Failed to update Google Calendar event" }).where(eq(clientCalendarConnections.clientId, existing.clientId));
+        return res.json({ ...updated, syncError: `Saved in EventHQ, but Google Calendar wasn't updated: ${write.error || "sync failed"}` });
+      }
+      if (write.eventId !== updated.googleEventId || !sameCalendar) {
+        await storage.updateCalendarEntry(entryId, {
+          googleEventId: write.eventId, googleCalendarId: connection.calendarId,
+          googleSyncKey: `${connection.calendarId}:${write.eventId}`,
+        });
       }
       await db.update(clientCalendarConnections).set({ error: null }).where(eq(clientCalendarConnections.clientId, existing.clientId));
-      res.json(await storage.getCalendarEntry(entryId));
+      const saved = await storage.getCalendarEntry(entryId);
+      res.json(write.invitesSkipped ? { ...saved, syncError: INVITES_SKIPPED } : saved);
     } catch (error: any) {
       console.error("Error updating calendar entry:", error);
       res.status(500).json({ error: error.message || "Failed to update calendar entry" });
@@ -2443,7 +2447,7 @@ export function registerApiRoutes(app: Express): void {
       
       // Do not remove the local record if its external event could not be deleted.
       const connection = (await db.select().from(clientCalendarConnections).where(eq(clientCalendarConnections.clientId, existing.clientId)))[0];
-      if (existing.googleEventId && connection && existing.googleCalendarId === connection.calendarId) {
+      if (existing.googleEventId && connection && existing.googleCalendarId === connection.calendarId && isGoogleCalendarConfigured()) {
         if (!await deleteGoogleCalendarEvent(existing.googleEventId, connection.calendarId)) {
           await db.update(clientCalendarConnections).set({ error: "Failed to delete Google Calendar event" }).where(eq(clientCalendarConnections.clientId, existing.clientId));
           return res.status(502).json({ error: "Google Calendar could not delete this event. The local event was kept." });
