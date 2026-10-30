@@ -15,6 +15,7 @@ import { passwordProblem } from "./passwords";
 import { createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent, isGoogleCalendarConfigured } from "./googleCalendar";
 import { refreshCalendarIfStale } from "./calendar-sync";
 import { registerPortalRoutes } from "./portal-routes";
+import { registerWhopWebhook } from "./whop-webhook";
 import { activityLogger, registerActivityRoutes } from "./activity-log";
 import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
@@ -1949,6 +1950,8 @@ export function registerApiRoutes(app: Express): void {
       res.status(500).json({ error: error.message || "Failed to mark video incomplete" });
     }
   });
+
+  registerWhopWebhook(app);
 
   // HIGHLEVEL WEBHOOK
   app.post("/api/webhooks/highlevel/sale", async (req, res) => {

@@ -555,14 +555,14 @@ export default function ClientWorkspacePage() {
       queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/webhook-token`] });
       toast({
         title: "Token Regenerated",
-        description: "Your webhook token has been regenerated. Update your HighLevel webhook URL.",
+        description: "Your webhook token has been regenerated. Update your HighLevel and Whop webhook URLs.",
       });
     },
   });
 
-  const handleCopyWebhookUrl = () => {
+  const handleCopyWebhookUrl = (path = "/api/webhooks/highlevel/sale") => {
     if (webhookConfig?.webhookToken) {
-      const url = `${window.location.origin}/api/webhooks/highlevel/sale?token=${webhookConfig.webhookToken}`;
+      const url = `${window.location.origin}${path}?token=${webhookConfig.webhookToken}`;
       navigator.clipboard.writeText(url);
       toast({
         title: "Copied!",
@@ -1097,10 +1097,10 @@ export default function ClientWorkspacePage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Link className="h-5 w-5" />
-                    HighLevel Webhook Integration
+                    Sales Webhooks (HighLevel &amp; Whop)
                   </CardTitle>
                   <CardDescription>
-                    Use this webhook URL in HighLevel to automatically track sales for this client.
+                    Use these webhook URLs in HighLevel or Whop to automatically track sales for this client.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -1116,7 +1116,7 @@ export default function ClientWorkspacePage() {
                       <Button 
                         variant="outline" 
                         size="icon"
-                        onClick={handleCopyWebhookUrl}
+                        onClick={() => handleCopyWebhookUrl()}
                         data-testid="button-copy-webhook"
                       >
                         <Copy className="h-4 w-4" />
@@ -1127,11 +1127,34 @@ export default function ClientWorkspacePage() {
                     </p>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label>Whop Webhook URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        readOnly
+                        value={webhookConfig?.webhookToken ? `${window.location.origin}/api/webhooks/whop?token=${webhookConfig.webhookToken}` : "Loading..."}
+                        className="font-mono text-sm"
+                        data-testid="input-whop-webhook-url"
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleCopyWebhookUrl("/api/webhooks/whop")}
+                        data-testid="button-copy-whop-webhook"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      In Whop, go to Developer → Webhooks, add this URL, and turn on payment.succeeded, refund.created and refund.updated.
+                    </p>
+                  </div>
+
                   <div className="border-t pt-4 space-y-2">
                     <Label>Regenerate Token</Label>
                     <p className="text-sm text-muted-foreground mb-2">
                       If you need to invalidate the current webhook URL, you can regenerate the token. 
-                      This will require updating the webhook URL in HighLevel.
+                      This will require updating the webhook URLs in HighLevel and Whop.
                     </p>
                     <Button 
                       variant="destructive"
