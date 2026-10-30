@@ -125,3 +125,24 @@ export function summarizeCampaigns(rows: { amountSpent: string | number; impress
   }
   return totals;
 }
+
+export type GoalBreakdown = { goal: string; campaigns: number; spent: number; results: number; costPerResult: number | null; shareOfSpend: number };
+
+/** Spend and results grouped by what each campaign was optimised for, biggest spend first. */
+export function breakdownByGoal(rows: { amountSpent: string | number; results: number | null; resultType: string | null }[]): GoalBreakdown[] {
+  const groups = new Map<string, { campaigns: number; spent: number; results: number }>();
+  let total = 0;
+  for (const row of rows) {
+    const goal = resultLabel(row.resultType);
+    const spent = Number(row.amountSpent) || 0;
+    total += spent;
+    const group = groups.get(goal) ?? { campaigns: 0, spent: 0, results: 0 };
+    group.campaigns++; group.spent += spent; group.results += row.results ?? 0;
+    groups.set(goal, group);
+  }
+  return Array.from(groups, ([goal, g]) => ({
+    goal, campaigns: g.campaigns, spent: g.spent, results: g.results,
+    costPerResult: g.results ? g.spent / g.results : null,
+    shareOfSpend: total ? g.spent / total : 0,
+  })).sort((a, b) => b.spent - a.spent);
+}

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import express from "express";
 import { eq, inArray } from "drizzle-orm";
 import { activityLog, agencies, clients, metaAdCampaigns, users } from "@shared/schema";
-import { parseMetaCampaignsCsv, resultLabel } from "@shared/meta-campaigns";
+import { breakdownByGoal, parseMetaCampaignsCsv, resultLabel } from "@shared/meta-campaigns";
 import { db } from "./storage";
 import { registerApiRoutes } from "./routes";
 
@@ -34,6 +34,15 @@ test("reads a Meta Ads Manager campaigns export", () => {
   assert.equal(resultLabel(rows[1].resultType), "Landing page views");
   assert.equal(resultLabel(rows[2].resultType), "Registrations");
   assert.match(parseMetaCampaignsCsv("title,url\nx,y").errors[0].message, /Meta Ads Manager/);
+});
+
+test("groups campaign stats by goal", () => {
+  const goals = breakdownByGoal(parseMetaCampaignsCsv(EXPORT).rows);
+  assert.deepEqual(goals.map(g => [g.goal, g.campaigns, g.spent, g.results]), [
+    ["Purchases", 1, 4980, 120], ["Registrations", 1, 3750, 3000], ["Landing page views", 1, 750, 2500],
+  ]);
+  assert.equal(goals[0].costPerResult, 41.5);
+  assert.equal(goals.reduce((sum, g) => sum + g.shareOfSpend, 0).toFixed(6), "1.000000");
 });
 
 test("admins import campaigns; the workspace's client and team can read them", async () => {
