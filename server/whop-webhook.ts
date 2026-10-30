@@ -10,7 +10,11 @@ type WhopSale = {
   refundAmount: number; productName: string | null; customerEmail: string | null; customerName: string | null; saleDate: Date;
 };
 
-const num = (v: unknown) => (typeof v === "number" || typeof v === "string") && Number.isFinite(Number(v)) ? Number(v) : null;
+// Whop sends money either as a plain number or as { amount: "997.00", currency, decimals }.
+const num = (v: unknown): number | null => {
+  if (v && typeof v === "object" && "amount" in v) return num((v as { amount: unknown }).amount);
+  return (typeof v === "number" || typeof v === "string") && v !== "" && Number.isFinite(Number(v)) ? Number(v) : null;
+};
 const str = (v: unknown, max: number) => typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
 const date = (...values: unknown[]) => {
   for (const v of values) {
@@ -29,11 +33,12 @@ export function whopEventToSale(body: any): WhopSale | { remove: string } | null
   const currency = (str(d.currency, 10) ?? "usd").toUpperCase();
   if (type === "payment.succeeded") {
     const amount = num(d.total) ?? num(d.subtotal) ?? num(d.usd_total) ?? num(d.final_amount);
-    if (amount === null || amount < 0) return null;
+    // Free and 100%-off orders bring in no revenue.
+    if (amount === null || amount <= 0) return null;
     return {
       dedupeKey: `whop:${d.id}`, externalId: d.id, amount, currency, status: "paid", refundAmount: 0,
-      productName: str(d.product?.title, 500) ?? str(d.plan?.title, 500),
-      customerEmail: email(d.user?.email ?? d.email), customerName: str(d.user?.name ?? d.user?.username, 300),
+      productName: str(d.product?.title, 500) ?? str(d.line_items?.[0]?.product_title, 500) ?? str(d.plan?.title, 500),
+      customerEmail: email(d.user?.email ?? d.customer_email ?? d.email), customerName: str(d.user?.name ?? d.user?.username, 300),
       saleDate: date(d.paid_at, d.created_at, body.timestamp),
     };
   }
@@ -45,8 +50,8 @@ export function whopEventToSale(body: any): WhopSale | { remove: string } | null
     if (amount === null || amount <= 0) return null;
     return {
       dedupeKey: key, externalId: d.id, amount, currency, status: "refunded", refundAmount: amount,
-      productName: str(d.payment?.product?.title, 500) ?? "Whop refund",
-      customerEmail: email(d.payment?.user?.email), customerName: str(d.payment?.user?.name, 300),
+      productName: str(d.payment?.product?.title, 500) ?? str(d.payment?.line_items?.[0]?.product_title, 500) ?? "Whop refund",
+      customerEmail: email(d.payment?.user?.email ?? d.payment?.customer_email), customerName: str(d.payment?.user?.name, 300),
       saleDate: date(d.created_at, body.timestamp),
     };
   }

@@ -39,6 +39,23 @@ test("whopEventToSale maps payments and refunds and ignores everything else", ()
   assert.equal(whopEventToSale({ type: "payment.failed", data: { id: "pay_2", total: 10 } }), null);
   assert.equal(whopEventToSale({ type: "membership.activated", data: { id: "mem_1" } }), null);
   assert.equal(whopEventToSale({}), null);
+
+  // Whop's current API wraps money in objects and puts the buyer's email in customer_email.
+  const money = (amount: string) => ({ currency: "usd", amount, decimals: 2 });
+  const current = whopEventToSale({ type: "payment.succeeded", data: {
+    id: "pay_obj", total: money("997.00"), subtotal: money("997.00"), currency: "usd",
+    customer_email: "Buyer@Example.com", user: { name: null, username: "buyer", email: null }, paid_at: "2026-10-30T15:29:08Z",
+    line_items: [{ product_title: "Relational Intelligence Academy" }],
+  } });
+  assert.ok(current && !("remove" in current));
+  assert.equal(current.amount, 997);
+  assert.equal(current.customerEmail, "buyer@example.com");
+  assert.equal(current.productName, "Relational Intelligence Academy");
+  const refunded = whopEventToSale({ type: "refund.created", data: { id: "rf_obj", status: "succeeded", amount: money("27.00") } });
+  assert.ok(refunded && !("remove" in refunded));
+  assert.equal(refunded.refundAmount, 27);
+  // A 100%-off order is not revenue.
+  assert.equal(whopEventToSale({ type: "payment.succeeded", data: { id: "pay_free", total: money("0.00"), subtotal: money("997.00") } }), null);
 });
 
 test("Whop webhook records sales once per payment, needs the workspace token, and handles refunds", async () => {
