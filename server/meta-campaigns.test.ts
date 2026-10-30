@@ -9,11 +9,11 @@ import { parseMetaCampaignsCsv, resultLabel } from "@shared/meta-campaigns";
 import { db } from "./storage";
 import { registerApiRoutes } from "./routes";
 
-// Rows copied from a real Ads Manager export.
+// Made-up campaigns laid out exactly like an Ads Manager campaigns export.
 const EXPORT = `"Reporting starts","Reporting ends","Campaign name","Campaign delivery","Attribution setting",Results,"Result indicator","Cost per results","Ad set budget","Ad set budget type","Amount spent (USD)",Impressions,Reach,Ends,"Results (initial)","Results (initial) indicator"
-2023-09-30,2026-10-30,"AR_Bible U",inactive,"7-day click or 1-day view",155,actions:offsite_conversion.fb_pixel_purchase,149.17922581,"Using ad set budget",0,23122.78,2071147,328646,Ongoing,,
-2023-09-30,2026-10-30,ar_elevate_|_traffic,inactive,"7-day click or 1-day view",3407,actions:omni_landing_page_view,0.26899031,"Using ad set budget",0,916.45,145066,71954,2024-02-02,,
-2023-09-30,2026-10-30,"Art of Elevation April 2026",completed,"7-day click, 1-day view, or 1-day engaged-view",8462,actions:offsite_conversion.fb_pixel_complete_registration,1.17831127,10000,Lifetime,9970.87,800017,268512,2026-04-28,,
+2025-01-01,2025-12-31,"Sample Course Sales",inactive,"7-day click or 1-day view",120,actions:offsite_conversion.fb_pixel_purchase,41.5,"Using ad set budget",0,4980.00,412000,96000,Ongoing,,
+2025-01-01,2025-12-31,sample_launch_|_traffic,inactive,"7-day click or 1-day view",2500,actions:omni_landing_page_view,0.3,"Using ad set budget",0,750.00,98000,51000,2025-03-15,,
+2025-01-01,2025-12-31,"Sample Summit Registrations",completed,"7-day click, 1-day view, or 1-day engaged-view",3000,actions:offsite_conversion.fb_pixel_complete_registration,1.25,5000,Lifetime,3750.00,300000,120000,2025-06-30,,
 `;
 
 test("reads a Meta Ads Manager campaigns export", () => {
@@ -21,15 +21,15 @@ test("reads a Meta Ads Manager campaigns export", () => {
   assert.deepEqual(errors, []);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows[0], {
-    campaignName: "AR_Bible U", delivery: "inactive", resultType: "actions:offsite_conversion.fb_pixel_purchase",
-    results: 155, costPerResult: 149.17922581, amountSpent: 23122.78, impressions: 2071147, reach: 328646,
-    budget: null, budgetType: null, endsOn: null, reportingStart: "2023-09-30", reportingEnd: "2026-10-30",
+    campaignName: "Sample Course Sales", delivery: "inactive", resultType: "actions:offsite_conversion.fb_pixel_purchase",
+    results: 120, costPerResult: 41.5, amountSpent: 4980, impressions: 412000, reach: 96000,
+    budget: null, budgetType: null, endsOn: null, reportingStart: "2025-01-01", reportingEnd: "2025-12-31",
     attribution: "7-day click or 1-day view",
   });
-  assert.equal(rows[2].budget, 10000);
+  assert.equal(rows[2].budget, 5000);
   assert.equal(rows[2].budgetType, "Lifetime");
-  assert.equal(rows[2].amountSpent, 9970.87);
-  assert.equal(rows[2].endsOn, "2026-04-28");
+  assert.equal(rows[2].amountSpent, 3750);
+  assert.equal(rows[2].endsOn, "2025-06-30");
   assert.equal(resultLabel(rows[0].resultType), "Purchases");
   assert.equal(resultLabel(rows[1].resultType), "Landing page views");
   assert.equal(resultLabel(rows[2].resultType), "Registrations");
@@ -82,13 +82,13 @@ test("admins import campaigns; the workspace's client and team can read them", a
     assert.equal(imported.body.importedCampaigns, 3);
 
     // A newer export updates the same campaigns instead of adding copies.
-    const newer = EXPORT.replace("23122.78", "24000.00");
+    const newer = EXPORT.replace("4980.00", "5200.00");
     assert.equal((await request(admin, `${path}/import`, "POST", { csv: newer })).status, 200);
     const listed = await request(portal, path);
     assert.equal(listed.status, 200);
     assert.equal(listed.body.length, 3);
-    assert.equal(listed.body[0].campaignName, "AR_Bible U");
-    assert.equal(listed.body[0].amountSpent, "24000.00");
+    assert.equal(listed.body[0].campaignName, "Sample Course Sales");
+    assert.equal(listed.body[0].amountSpent, "5200.00");
     assert.equal((await request(rep, path)).status, 200);
     assert.equal((await request(outsider, path)).status, 403);
   } finally {
