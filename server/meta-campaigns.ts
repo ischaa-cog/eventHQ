@@ -1,10 +1,35 @@
 import type { Express } from "express";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import { isAuthenticated } from "./auth";
 import { db } from "./storage";
 import { hasFullAccess } from "@shared/roles";
-import { metaAdCampaigns, type User } from "@shared/schema";
+import { metaAdCampaigns, vaultAssets, type MetaAdCampaign, type User } from "@shared/schema";
 import { parseMetaCampaignsCsv } from "@shared/meta-campaigns";
+
+// Until the meta_ad_campaigns table exists in the live database, an export is kept in the workspace's
+// staff-only Upload Vault under this name, and the campaigns are read from the newest one.
+export const VAULT_EXPORT_NAME = "Meta Ads campaigns export";
+const missingTable = (error: any) => (error?.code ?? error?.cause?.code) === "42P01";
+
+export function campaignsFromExport(clientId: number, csv: string, savedAt: Date): MetaAdCampaign[] {
+  const byName = new Map(parseMetaCampaignsCsv(csv).rows.map(row => [row.campaignName, row]));
+  return Array.from(byName.values())
+    .map((row, index) => ({
+      id: -(index + 1), clientId, ...row,
+      costPerResult: row.costPerResult === null ? null : row.costPerResult.toFixed(4),
+      amountSpent: row.amountSpent.toFixed(2),
+      budget: row.budget === null ? null : row.budget.toFixed(2),
+      updatedAt: savedAt,
+    }))
+    .sort((a, b) => Number(b.amountSpent) - Number(a.amountSpent));
+}
+
+async function campaignsFromVault(clientId: number): Promise<MetaAdCampaign[]> {
+  const [saved] = await db.select().from(vaultAssets)
+    .where(and(eq(vaultAssets.clientId, clientId), ilike(vaultAssets.name, `${VAULT_EXPORT_NAME}%`)))
+    .orderBy(desc(vaultAssets.createdAt), desc(vaultAssets.id)).limit(1);
+  return saved?.content ? campaignsFromExport(clientId, saved.content, saved.createdAt) : [];
+}
 
 // Meta ad campaign totals per workspace. Everyone with access to the workspace (the client included)
 // can read them; only admins import a new Ads Manager export.
@@ -18,10 +43,14 @@ export function registerMetaCampaignRoutes(
       const clientId = Number(req.params.clientId);
       const user = await getRequestUser(req);
       if (!Number.isSafeInteger(clientId) || !await canAccessClient(user, clientId)) return res.status(403).json({ error: "Forbidden" });
-      const campaigns = await db.select().from(metaAdCampaigns)
-        .where(eq(metaAdCampaigns.clientId, clientId))
-        .orderBy(desc(metaAdCampaigns.amountSpent));
-      res.json(campaigns);
+      try {
+        res.json(await db.select().from(metaAdCampaigns)
+          .where(eq(metaAdCampaigns.clientId, clientId))
+          .orderBy(desc(metaAdCampaigns.amountSpent)));
+      } catch (error) {
+        if (!missingTable(error)) throw error;
+        res.json(await campaignsFromVault(clientId));
+      }
     } catch (error) {
       console.error("Error loading Meta campaigns:", error);
       res.status(500).json({ error: "Could not load ad campaigns." });
@@ -61,16 +90,22 @@ export function registerMetaCampaignRoutes(
         updatedAt: new Date(),
       }));
       const excluded = (column: string) => sql.raw(`excluded.${column}`);
-      await db.insert(metaAdCampaigns).values(values).onConflictDoUpdate({
-        target: [metaAdCampaigns.clientId, metaAdCampaigns.campaignName],
-        set: {
-          delivery: excluded("delivery"), resultType: excluded("result_type"), results: excluded("results"),
-          costPerResult: excluded("cost_per_result"), amountSpent: excluded("amount_spent"), impressions: excluded("impressions"),
-          reach: excluded("reach"), budget: excluded("budget"), budgetType: excluded("budget_type"), endsOn: excluded("ends_on"),
-          reportingStart: excluded("reporting_start"), reportingEnd: excluded("reporting_end"), attribution: excluded("attribution"),
-          updatedAt: excluded("updated_at"),
-        },
-      });
+      try {
+        await db.insert(metaAdCampaigns).values(values).onConflictDoUpdate({
+          target: [metaAdCampaigns.clientId, metaAdCampaigns.campaignName],
+          set: {
+            delivery: excluded("delivery"), resultType: excluded("result_type"), results: excluded("results"),
+            costPerResult: excluded("cost_per_result"), amountSpent: excluded("amount_spent"), impressions: excluded("impressions"),
+            reach: excluded("reach"), budget: excluded("budget"), budgetType: excluded("budget_type"), endsOn: excluded("ends_on"),
+            reportingStart: excluded("reporting_start"), reportingEnd: excluded("reporting_end"), attribution: excluded("attribution"),
+            updatedAt: excluded("updated_at"),
+          },
+        });
+      } catch (error) {
+        if (!missingTable(error)) throw error;
+        // No campaigns table yet: keep the export in the staff-only Upload Vault instead.
+        await db.insert(vaultAssets).values({ clientId, name: VAULT_EXPORT_NAME, fileType: "csv", content: req.body.csv });
+      }
       res.json({ importedCampaigns: values.length });
     } catch (error) {
       console.error("Error importing Meta campaigns:", error);

@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
-import { eq, inArray } from "drizzle-orm";
-import { activityLog, agencies, clients, metaAdCampaigns, users } from "@shared/schema";
+import { eq, inArray, sql } from "drizzle-orm";
+import { activityLog, agencies, clients, metaAdCampaigns, users, vaultAssets } from "@shared/schema";
 import { breakdownByGoal, parseMetaCampaignsCsv, resultLabel } from "@shared/meta-campaigns";
 import { db } from "./storage";
 import { registerApiRoutes } from "./routes";
@@ -100,11 +100,27 @@ test("admins import campaigns; the workspace's client and team can read them", a
     assert.equal(listed.body[0].amountSpent, "5200.00");
     assert.equal((await request(rep, path)).status, 200);
     assert.equal((await request(outsider, path)).status, 403);
+
+    // Without the campaigns table (the live database today), imports go to the Upload Vault and are read back from there.
+    await db.execute(sql`ALTER TABLE meta_ad_campaigns RENAME TO meta_ad_campaigns_hidden`);
+    try {
+      const otherPath = `/api/clients/${other.id}/meta-campaigns`;
+      assert.deepEqual((await request(admin, otherPath)).body, []);
+      assert.equal((await request(admin, `${otherPath}/import`, "POST", { csv: EXPORT })).body.importedCampaigns, 3);
+      const fromVault = await request(outsider, otherPath);
+      assert.equal(fromVault.status, 200);
+      assert.deepEqual(fromVault.body.map((c: any) => [c.campaignName, c.amountSpent]), [
+        ["Sample Course Sales", "4980.00"], ["Sample Summit Registrations", "3750.00"], ["sample_launch_|_traffic", "750.00"],
+      ]);
+    } finally {
+      await db.execute(sql`ALTER TABLE meta_ad_campaigns_hidden RENAME TO meta_ad_campaigns`);
+    }
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (userIds.length) await db.delete(activityLog).where(inArray(activityLog.userId, userIds));
     await db.delete(metaAdCampaigns).where(inArray(metaAdCampaigns.clientId, [client.id, other.id]));
+    await db.delete(vaultAssets).where(inArray(vaultAssets.clientId, [client.id, other.id]));
     if (userIds.length) await db.delete(users).where(inArray(users.id, userIds));
     await db.delete(clients).where(inArray(clients.id, [client.id, other.id]));
     await db.delete(agencies).where(eq(agencies.id, agency.id));
