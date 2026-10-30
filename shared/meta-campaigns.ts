@@ -110,3 +110,18 @@ export function parseMetaCampaignsCsv(text: string): MetaCampaignParse {
   }
   return { rows, errors };
 }
+
+export type CampaignTotals = { spent: number; impressions: number; purchases: number; registrations: number };
+
+/** Totals across campaigns; purchases and registrations add up the campaigns optimised for them. */
+export function summarizeCampaigns(rows: { amountSpent: string | number; impressions: number | null; results: number | null; resultType: string | null }[]): CampaignTotals {
+  const totals: CampaignTotals = { spent: 0, impressions: 0, purchases: 0, registrations: 0 };
+  for (const row of rows) {
+    totals.spent += Number(row.amountSpent) || 0;
+    totals.impressions += row.impressions ?? 0;
+    const label = resultLabel(row.resultType);
+    if (label === "Purchases") totals.purchases += row.results ?? 0;
+    if (label === "Registrations") totals.registrations += row.results ?? 0;
+  }
+  return totals;
+}

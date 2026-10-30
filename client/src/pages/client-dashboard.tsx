@@ -10,6 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { endOfDay, format } from "date-fns";
 import { useAuth } from "@/hooks/useAuth";
+import { MetaCampaignsSummary } from "@/components/MetaCampaignsSummary";
+import type { MetaAdCampaign } from "@shared/schema";
 
 interface SalesStats {
   today: { total: number; count: number };
@@ -145,6 +147,12 @@ export default function ClientDashboard() {
       if (!res.ok) throw new Error("Failed to fetch Meta Ads status");
       return res.json();
     },
+  });
+
+  // Campaign totals imported from a Meta Ads Manager export (see the Ad Campaigns page).
+  const { data: metaCampaigns = [] } = useQuery<MetaAdCampaign[]>({
+    queryKey: [`/api/clients/${clientId}/meta-campaigns`],
+    enabled: !!clientId,
   });
 
   const adSpendCustomQuery = adSpendCustomStart && adSpendCustomEnd
@@ -510,7 +518,7 @@ export default function ClientDashboard() {
                 </CardContent>
               </Card>
             </div>
-          ) : (
+          ) : metaCampaigns.length ? null : (
             <Card className="border-dashed border-blue-200">
               <CardContent className="flex flex-col items-center justify-center py-10 gap-3 text-center">
                 <div className="h-12 w-12 rounded-full bg-blue-50 flex items-center justify-center">
@@ -535,6 +543,7 @@ export default function ClientDashboard() {
               </CardContent>
             </Card>
           )}
+          {metaCampaigns.length > 0 && <MetaCampaignsSummary clientId={clientId} campaigns={metaCampaigns} />}
         </div>
 
         {/* Project & Marketing Overview Section */}

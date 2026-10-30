@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { hasFullAccess } from "@shared/roles";
-import { resultLabel } from "@shared/meta-campaigns";
+import { resultLabel, summarizeCampaigns } from "@shared/meta-campaigns";
 import type { MetaAdCampaign } from "@shared/schema";
 
 const money = (value: number) => `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -45,16 +45,7 @@ export default function AdCampaignsPage() {
   });
 
   const rows = campaigns.data ?? [];
-  const totals = useMemo(() => {
-    const byResult = new Map<string, number>();
-    let spent = 0, impressions = 0;
-    for (const row of rows) {
-      spent += Number(row.amountSpent) || 0;
-      impressions += row.impressions ?? 0;
-      if (row.results) byResult.set(resultLabel(row.resultType), (byResult.get(resultLabel(row.resultType)) ?? 0) + row.results);
-    }
-    return { spent, impressions, purchases: byResult.get("Purchases") ?? 0, registrations: byResult.get("Registrations") ?? 0 };
-  }, [rows]);
+  const totals = useMemo(() => summarizeCampaigns(rows), [rows]);
   const period = rows.find(row => row.reportingStart && row.reportingEnd);
   const visible = showAll ? rows : rows.slice(0, 25);
 
