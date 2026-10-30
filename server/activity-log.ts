@@ -57,6 +57,7 @@ export const ACTIVITY_RULES: Rule[] = [
   rule("DELETE", `/api/training/resources/${ID}`, "Deleted lesson", "lesson"),
 
   rule("POST", `${CLIENT}/sales/import`, "Imported sales"),
+  rule("POST", `${CLIENT}/meta-campaigns/import`, "Imported Meta ad campaigns"),
   rule("POST", `${CLIENT}/sales/sources`, "Added sales source"),
   rule("POST", `${CLIENT}/regenerate-webhook-token`, "Regenerated HighLevel webhook"),
   rule("PATCH", `${CLIENT}/google-drive/folder`, "Changed Drive folder link"),
@@ -132,6 +133,7 @@ const text = (value: unknown) => typeof value === "string" && value.trim() ? val
 
 function describeItem(found: Found, responseBody: any, requestBody: any): string | undefined {
   if (typeof responseBody?.created === "number") return `${responseBody.created} lesson${responseBody.created === 1 ? "" : "s"}`;
+  if (typeof responseBody?.importedCampaigns === "number") return `${responseBody.importedCampaigns} campaign${responseBody.importedCampaigns === 1 ? "" : "s"}`;
   if (typeof responseBody?.imported === "number") return `${responseBody.imported} sale${responseBody.imported === 1 ? "" : "s"}`;
   return text(found.item) ?? text(responseBody?.title) ?? text(responseBody?.name) ?? text(responseBody?.email)
     ?? text(requestBody?.title) ?? text(requestBody?.subject) ?? text(requestBody?.name) ?? text(requestBody?.email);

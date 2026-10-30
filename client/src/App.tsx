@@ -23,6 +23,7 @@ import NotificationsPage from "@/pages/notifications";
 import SendNotificationsPage from "@/pages/send-notifications";
 import NeoKnowledgePage from "@/pages/neo-knowledge";
 import ActivityLogPage from "@/pages/activity-log";
+import AdCampaignsPage from "@/pages/ad-campaigns";
 import ClientNotificationsPage from "@/pages/client-notifications";
 import ClientOnboardingPage from "@/pages/client-onboarding";
 import AccessDeniedPage from "@/pages/access-denied";
@@ -145,7 +146,7 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|calendar|sales|events|projections|training|notifications|neo)$/);
+  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|calendar|sales|events|ads|projections|training|notifications|neo)$/);
   if (!clientPath || Number(clientPath[1]) !== clients.data?.[0]?.id) return <AccessDeniedPage />;
   return <>{children}</>;
 }
@@ -209,6 +210,7 @@ function Router() {
       {/* Event Builder (client/src/pages/event-builder.tsx) is hidden for now; re-add its route here to bring it back. */}
       <Route path="/client/:id/assets" component={() => <InternalOnlyFeature><AssetsPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/events" component={() => <ClientPortalFeature><EventTrackerPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/ads" component={() => <ClientPortalFeature><AdCampaignsPage /></ClientPortalFeature>} />
       <Route path="/client/:id/projections" component={() => <ClientPortalFeature><ClientProjectionsPage /></ClientPortalFeature>} />
       <Route path="/client/:id/training" component={() => <ClientPortalFeature><TrainingLabPage /></ClientPortalFeature>} />
       <Route path="/client/:id/calendar" component={() => <ClientPortalFeature><MarketingCalendarPage /></ClientPortalFeature>} />

@@ -50,7 +50,7 @@ export function guessResourceType(url: string): "video" | "document" {
   }
 }
 
-function splitCsv(text: string): string[][] {
+export function splitCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [], cell = "", quoted = false;
   for (let i = 0; i < text.length; i++) {

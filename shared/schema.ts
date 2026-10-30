@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, jsonb, numeric, index, boolean, uniqueIndex, customType, vector } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, jsonb, numeric, index, boolean, uniqueIndex, customType, vector, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -646,3 +646,28 @@ export const activityLog = pgTable("activity_log", {
   index("idx_activity_user").on(table.userId, table.createdAt),
 ]);
 export type ActivityLogEntry = typeof activityLog.$inferSelect;
+
+// Meta (Facebook/Instagram) ad campaign totals, imported from an Ads Manager "Campaigns" CSV export.
+// One row per campaign per workspace; a newer export of the same campaign replaces its numbers.
+export const metaAdCampaigns = pgTable("meta_ad_campaigns", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  campaignName: text("campaign_name").notNull(),
+  delivery: text("delivery"), // active, inactive, completed, ...
+  resultType: text("result_type"), // Meta's result indicator, e.g. actions:offsite_conversion.fb_pixel_purchase
+  results: integer("results"),
+  costPerResult: numeric("cost_per_result", { precision: 14, scale: 4 }),
+  amountSpent: numeric("amount_spent", { precision: 14, scale: 2 }).notNull().default("0"),
+  impressions: integer("impressions"),
+  reach: integer("reach"),
+  budget: numeric("budget", { precision: 14, scale: 2 }),
+  budgetType: text("budget_type"),
+  endsOn: date("ends_on"), // null while the campaign is ongoing
+  reportingStart: date("reporting_start"),
+  reportingEnd: date("reporting_end"),
+  attribution: text("attribution"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("meta_campaign_client_name_idx").on(table.clientId, table.campaignName),
+]);
+export type MetaAdCampaign = typeof metaAdCampaigns.$inferSelect;

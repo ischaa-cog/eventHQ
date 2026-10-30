@@ -21,6 +21,7 @@ import {
   WandSparkles,
   BookOpen,
   History,
+  Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -119,6 +120,7 @@ const clientNavigation = (clientId: string) => [
   { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
   { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },
+  { name: "Ad Campaigns", href: `/client/${clientId}/ads`, icon: Megaphone },
   { name: "Assets", href: `/client/${clientId}/assets`, icon: Image },
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
@@ -131,6 +133,7 @@ const clientPortalNavigation = (clientId: string) => [
   { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
   { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },
+  { name: "Ad Campaigns", href: `/client/${clientId}/ads`, icon: Megaphone },
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },

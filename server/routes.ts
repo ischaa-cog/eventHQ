@@ -17,6 +17,7 @@ import { refreshCalendarIfStale } from "./calendar-sync";
 import { registerPortalRoutes } from "./portal-routes";
 import { registerWhopWebhook } from "./whop-webhook";
 import { activityLogger, registerActivityRoutes } from "./activity-log";
+import { registerMetaCampaignRoutes } from "./meta-campaigns";
 import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
@@ -200,6 +201,7 @@ export function registerApiRoutes(app: Express): void {
     { method: "GET", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/messages\/?$/ },
     { method: "POST", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/messages\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/meta-ads\/(?:status|insights)\/?$/ },
+    { method: "GET", path: /^\/api\/clients\/\d+\/meta-campaigns\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/training\/resources\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/calendar\/connection\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/sales\/sources\/?$/ },
@@ -2980,4 +2982,5 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
   registerPortalRoutes(app, getRequestUser, canAccessClient);
   registerNeoKnowledgeRoutes(app, getRequestUser);
   registerActivityRoutes(app, getRequestUser);
+  registerMetaCampaignRoutes(app, getRequestUser, canAccessClient);
 }
