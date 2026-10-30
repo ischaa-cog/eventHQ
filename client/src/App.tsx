@@ -110,6 +110,12 @@ function ClientStart() {
   );
 }
 
+// Team members only work in their assigned workspaces; any other /client/:id page is denied.
+function isUnassignedWorkspace(user: { role?: string | null; clientAccess?: number[] | null } | null | undefined, location: string) {
+  const id = location.match(/^\/client\/(\d+)\//)?.[1];
+  return user?.role === "team_member" && !!id && !(user.clientAccess ?? []).includes(Number(id));
+}
+
 function ClientPortalFeature({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [location] = useLocation();
@@ -119,6 +125,7 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
     enabled: user?.role === "agency_client",
   });
 
+  if (isUnassignedWorkspace(user, location)) return <AccessDeniedPage />;
   if (user?.role !== "agency_client") return <>{children}</>;
   if (clients.isLoading) {
     return <div className="min-h-screen flex items-center justify-center bg-background text-foreground">Checking workspace access…</div>;
@@ -152,7 +159,8 @@ function AdminOnlyFeature({ children }: { children: ReactNode }) {
 
 function InternalOnlyFeature({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  return user?.role === "agency_client" ? <AccessDeniedPage /> : <>{children}</>;
+  const [location] = useLocation();
+  return user?.role === "agency_client" || isUnassignedWorkspace(user, location) ? <AccessDeniedPage /> : <>{children}</>;
 }
 
 function Router() {

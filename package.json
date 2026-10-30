@@ -10,7 +10,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "test": "tsx --env-file-if-exists=.env --test server/*.test.ts",
+    "test": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://localhost:5433/eventhq_test} tsx --env-file-if-exists=.env --test server/*.test.ts",
     "vercel-build": "tsx script/build-vercel.ts"
   },
   "dependencies": {

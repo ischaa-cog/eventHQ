@@ -26,7 +26,7 @@ import { createApp, log } from "./app";
     {
       port,
       host: "0.0.0.0",
-      reusePort: process.platform !== "win32", // not supported on Windows
+      reusePort: process.platform === "linux", // not supported on Windows or macOS
     },
     () => {
       log(`serving on port ${port}`);
