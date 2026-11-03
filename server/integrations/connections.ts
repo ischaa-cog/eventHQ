@@ -20,12 +20,17 @@ export type PublicConnection = {
   hasWebhookSecret: boolean;
   credentialHints: Record<string, string>;
   settings: unknown;
+  // How it signs in: an agency login, a Stripe sign-in through Composio, or its own key.
+  via: "agency" | "stripe-oauth" | "key";
+  grantId: number | null;
 };
 
 export function toPublic(row: IntegrationConnection): PublicConnection {
   let credentialHints: Record<string, string> = {};
+  let viaStripeLogin = false;
   try {
     const creds = decryptJson<ConnectionCredentials>(row.credentialsCiphertext) ?? {};
+    viaStripeLogin = !!creds.composioAccountId;
     credentialHints = Object.fromEntries(Object.entries(creds).map(([k, v]) => [k, maskSecret(String(v))]));
   } catch {
     credentialHints = { error: "unreadable" };
@@ -34,6 +39,7 @@ export function toPublic(row: IntegrationConnection): PublicConnection {
     id: row.id, clientId: row.clientId, provider: row.provider, externalAccountId: row.externalAccountId,
     displayName: row.displayName, status: row.status, lastSyncAt: row.lastSyncAt, lastWebhookAt: row.lastWebhookAt,
     lastError: row.lastError, hasWebhookSecret: !!row.webhookSecretCiphertext, credentialHints, settings: row.settings,
+    via: row.grantId ? "agency" : viaStripeLogin ? "stripe-oauth" : "key", grantId: row.grantId ?? null,
   };
 }
 
@@ -72,6 +78,7 @@ export async function saveConnection(input: {
   credentials?: ConnectionCredentials; // replaces stored credentials when given
   webhookSecret?: string | null; // undefined keeps, null clears
   settings?: unknown;
+  grantId?: number | null; // undefined keeps, null clears
 }): Promise<IntegrationConnection> {
   const values: Partial<typeof integrationConnections.$inferInsert> = {
     clientId: input.clientId,
@@ -87,6 +94,7 @@ export async function saveConnection(input: {
     values.webhookSecretCiphertext = input.webhookSecret ? encryptSecret(input.webhookSecret) : null;
   }
   if (input.settings !== undefined) values.settings = input.settings as any;
+  if (input.grantId !== undefined) values.grantId = input.grantId;
   const [row] = await db.insert(integrationConnections).values(values as any)
     .onConflictDoUpdate({
       target: [integrationConnections.clientId, integrationConnections.provider, integrationConnections.externalAccountId],
