@@ -32,8 +32,11 @@ async function copyWithDependencies(name: string, seen = new Set<string>()) {
 
 async function buildVercel() {
   // Production deploys migrate the database first. Preview deploys never touch it,
-  // because previews may share the production DATABASE_URL.
-  if (process.env.VERCEL_ENV === "production") {
+  // because previews may share the production DATABASE_URL. A production project with no
+  // database configured (another Vercel project linked to this repo) builds without migrating.
+  if (process.env.VERCEL_ENV === "production" && !process.env.DATABASE_URL) {
+    console.warn("skipping migrations: DATABASE_URL is not set for this project");
+  } else if (process.env.VERCEL_ENV === "production") {
     console.log("running database migrations...");
     await runMigrations();
   } else {
