@@ -227,8 +227,15 @@ export const sales = pgTable("sales", {
   eventPerformanceId: integer("event_performance_id"),
   dedupeKey: text("dedupe_key"),
   metadata: jsonb("metadata"),
+  // Set by provider syncs: which connection the sale came from and the provider's product/plan/price id,
+  // which is what links a sale to an event (see eventAttributionRules).
+  connectionId: integer("connection_id"),
+  productId: text("product_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [uniqueIndex("sales_client_dedupe_idx").on(table.clientId, table.dedupeKey)]);
+}, (table) => [
+  uniqueIndex("sales_client_dedupe_idx").on(table.clientId, table.dedupeKey),
+  index("idx_sales_client_date").on(table.clientId, table.saleDate),
+]);
 
 export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, createdAt: true });
 export type InsertSale = z.infer<typeof insertSaleSchema>;
@@ -671,3 +678,73 @@ export const metaAdCampaigns = pgTable("meta_ad_campaigns", {
   uniqueIndex("meta_campaign_client_name_idx").on(table.clientId, table.campaignName),
 ]);
 export type MetaAdCampaign = typeof metaAdCampaigns.$inferSelect;
+
+// PER-CLIENT INTEGRATIONS
+// One row per connected provider account for a client (a Meta ad account, a Stripe account, a Whop
+// company, ...). Secrets are encrypted with server/credentials.ts and never sent to the browser.
+export const INTEGRATION_PROVIDERS = ["meta", "whop", "stripe", "fanbasis", "highlevel"] as const;
+export type IntegrationProvider = typeof INTEGRATION_PROVIDERS[number];
+
+export const integrationConnections = pgTable("integration_connections", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  // The provider's id for the connected account (Meta ad account id, Stripe account id, ...).
+  // Empty string when the provider has no separate account id, so the unique index applies.
+  externalAccountId: text("external_account_id").notNull().default(""),
+  displayName: text("display_name"),
+  credentialsCiphertext: text("credentials_ciphertext"),
+  webhookSecretCiphertext: text("webhook_secret_ciphertext"),
+  status: text("status").notNull().default("active"), // active | error | disabled
+  settings: jsonb("settings"),
+  lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+  lastSyncCursor: text("last_sync_cursor"),
+  lastError: text("last_error"),
+  lastWebhookAt: timestamp("last_webhook_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("integration_client_provider_account_idx").on(table.clientId, table.provider, table.externalAccountId),
+]);
+export type IntegrationConnection = typeof integrationConnections.$inferSelect;
+
+// Daily ad spend per campaign, pulled from the ad platforms. Re-syncing a day replaces its numbers.
+export const adSpendDaily = pgTable("ad_spend_daily", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  connectionId: integer("connection_id").notNull().references(() => integrationConnections.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  accountId: text("account_id").notNull(),
+  campaignId: text("campaign_id").notNull(),
+  campaignName: text("campaign_name"),
+  date: date("date").notNull(), // in the ad account's own timezone, as the platform reports it
+  spend: numeric("spend", { precision: 14, scale: 2 }).notNull().default("0"),
+  currency: text("currency").notNull().default("USD"),
+  impressions: integer("impressions").default(0),
+  clicks: integer("clicks").default(0),
+  leads: integer("leads").default(0),
+  purchases: integer("purchases").default(0),
+  purchaseValue: numeric("purchase_value", { precision: 14, scale: 2 }).default("0"),
+  eventPerformanceId: integer("event_performance_id").references(() => eventPerformance.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("ad_spend_connection_campaign_date_idx").on(table.connectionId, table.campaignId, table.date),
+  index("idx_ad_spend_client_date").on(table.clientId, table.date),
+]);
+export type AdSpendDay = typeof adSpendDaily.$inferSelect;
+
+// What ties money to an event: sales of these products, and spend on these campaigns, count toward it.
+export const eventAttributionRules = pgTable("event_attribution_rules", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  eventPerformanceId: integer("event_performance_id").notNull().references(() => eventPerformance.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // "product" (sales) | "campaign" (ad spend)
+  provider: text("provider").notNull(),
+  matchValue: text("match_value").notNull(), // product/plan/price id, or campaign id
+  label: text("label"), // human-readable product or campaign name
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("event_attribution_unique_idx").on(table.clientId, table.kind, table.provider, table.matchValue),
+  index("idx_event_attribution_event").on(table.eventPerformanceId),
+]);
+export type EventAttributionRule = typeof eventAttributionRules.$inferSelect;

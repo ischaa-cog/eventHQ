@@ -2,13 +2,18 @@ import type { Express } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, storage } from "./storage";
 import { sales, salesSources } from "@shared/schema";
+import { verifyStandardWebhook } from "./webhook-signatures";
+import { connectionsFor, getConnection, markWebhook, webhookSecretOf } from "./integrations/connections";
+import { eventForProducts } from "./attribution";
 
 // Whop sends Standard Webhooks envelopes: { id, type, timestamp, data }.
 // Only completed payments and completed refunds change revenue; everything else is acknowledged and ignored.
 type WhopSale = {
   dedupeKey: string; externalId: string; amount: number; currency: string; status: "paid" | "refunded";
   refundAmount: number; productName: string | null; customerEmail: string | null; customerName: string | null; saleDate: Date;
+  productIds: string[]; // Whop product id first, then plan id: what event attribution matches on
 };
+const ids = (...values: unknown[]) => values.filter((v): v is string => typeof v === "string" && v.length > 0);
 
 // Whop sends money either as a plain number or as { amount: "997.00", currency, decimals }.
 const num = (v: unknown): number | null => {
@@ -40,6 +45,7 @@ export function whopEventToSale(body: any): WhopSale | { remove: string } | null
       productName: str(d.product?.title, 500) ?? str(d.line_items?.[0]?.product_title, 500) ?? str(d.plan?.title, 500),
       customerEmail: email(d.user?.email ?? d.customer_email ?? d.email), customerName: str(d.user?.name ?? d.user?.username, 300),
       saleDate: date(d.paid_at, d.created_at, body.timestamp),
+      productIds: ids(d.product?.id, d.product_id, d.line_items?.[0]?.product_id, d.plan?.id, d.plan_id),
     };
   }
   if (type === "refund.created" || type === "refund.updated") {
@@ -53,12 +59,63 @@ export function whopEventToSale(body: any): WhopSale | { remove: string } | null
       productName: str(d.payment?.product?.title, 500) ?? str(d.payment?.line_items?.[0]?.product_title, 500) ?? "Whop refund",
       customerEmail: email(d.payment?.user?.email ?? d.payment?.customer_email), customerName: str(d.payment?.user?.name, 300),
       saleDate: date(d.created_at, body.timestamp),
+      productIds: ids(d.payment?.product?.id, d.payment?.product_id, d.payment?.plan?.id, d.payment?.plan_id),
     };
   }
   return null;
 }
 
+// Records one Whop event for a client. connectionId is set when the delivery was signature-verified.
+export async function recordWhopEvent(clientId: number, connectionId: number | null, body: unknown) {
+  const sale = whopEventToSale(body);
+  if (!sale) return { ignored: true as const };
+  if ("remove" in sale) {
+    await db.delete(sales).where(and(eq(sales.clientId, clientId), eq(sales.dedupeKey, sale.remove)));
+    return { removed: true as const };
+  }
+  const eventPerformanceId = await eventForProducts(clientId, "whop", sale.productIds);
+  const value = {
+    clientId, amount: sale.amount.toFixed(2), currency: sale.currency, productName: sale.productName,
+    customerEmail: sale.customerEmail, customerName: sale.customerName, saleDate: sale.saleDate,
+    externalId: sale.externalId, source: "whop", status: sale.status,
+    metadata: { refundAmount: sale.refundAmount }, dedupeKey: sale.dedupeKey,
+    productId: sale.productIds[0] ?? null,
+    ...(connectionId ? { connectionId } : {}),
+    ...(eventPerformanceId ? { eventPerformanceId } : {}),
+  };
+  // Whop retries deliveries, and the API sync sees the same payments, so the same payment or
+  // refund updates its existing row.
+  const [row] = await db.insert(sales).values(value as any)
+    .onConflictDoUpdate({ target: [sales.clientId, sales.dedupeKey], set: value as any }).returning({ id: sales.id });
+  await db.insert(salesSources).values({
+    clientId, processor: "whop", configured: true, verified: true, lastSync: new Date(), error: null,
+  }).onConflictDoUpdate({
+    target: [salesSources.clientId, salesSources.processor],
+    set: { configured: true, verified: true, lastSync: new Date(), error: null },
+  });
+  return { saleId: row?.id };
+}
+
 export function registerWhopWebhook(app: Express) {
+  // Preferred: one URL per connection, accepted only with a valid Whop signature.
+  app.post("/api/webhooks/whop/:connectionId", async (req, res) => {
+    try {
+      const connection = /^\d+$/.test(req.params.connectionId) ? await getConnection(Number(req.params.connectionId)) : undefined;
+      const secret = connection?.provider === "whop" ? webhookSecretOf(connection) : undefined;
+      if (!connection || !secret || !req.rawBody ||
+          !verifyStandardWebhook(req.rawBody as Buffer, req.headers, secret)) {
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+      await markWebhook(connection.id);
+      res.status(200).json({ success: true, ...(await recordWhopEvent(connection.clientId, connection.id, req.body)) });
+    } catch (error: any) {
+      console.error("Error processing Whop webhook:", error);
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  });
+
+  // Legacy: the client's shared token in the URL. Once a Whop connection with a signing secret
+  // exists for the client, deliveries here must carry a valid signature too.
   app.post("/api/webhooks/whop", async (req, res) => {
     try {
       const { token } = req.query;
@@ -66,28 +123,15 @@ export function registerWhopWebhook(app: Express) {
       const client = await storage.getClientByWebhookToken(token);
       if (!client) return res.status(401).json({ error: "Invalid webhook token" });
 
-      const sale = whopEventToSale(req.body);
-      if (!sale) return res.status(200).json({ success: true, ignored: true });
-      if ("remove" in sale) {
-        await db.delete(sales).where(and(eq(sales.clientId, client.id), eq(sales.dedupeKey, sale.remove)));
-        return res.status(200).json({ success: true, removed: true });
+      const signed = (await connectionsFor(client.id, "whop")).filter((c) => c.webhookSecretCiphertext);
+      let connectionId: number | null = null;
+      if (signed.length) {
+        const match = signed.find((c) => req.rawBody && verifyStandardWebhook(req.rawBody as Buffer, req.headers, webhookSecretOf(c)!));
+        if (!match) return res.status(401).json({ error: "Invalid signature" });
+        connectionId = match.id;
+        await markWebhook(match.id);
       }
-      const value = {
-        clientId: client.id, amount: sale.amount.toFixed(2), currency: sale.currency, productName: sale.productName,
-        customerEmail: sale.customerEmail, customerName: sale.customerName, saleDate: sale.saleDate,
-        externalId: sale.externalId, source: "whop", status: sale.status,
-        metadata: { refundAmount: sale.refundAmount }, dedupeKey: sale.dedupeKey,
-      };
-      // Whop retries deliveries, so the same payment or refund updates its existing row.
-      const [row] = await db.insert(sales).values(value as any)
-        .onConflictDoUpdate({ target: [sales.clientId, sales.dedupeKey], set: value as any }).returning({ id: sales.id });
-      await db.insert(salesSources).values({
-        clientId: client.id, processor: "whop", configured: true, verified: true, lastSync: new Date(), error: null,
-      }).onConflictDoUpdate({
-        target: [salesSources.clientId, salesSources.processor],
-        set: { configured: true, verified: true, lastSync: new Date(), error: null },
-      });
-      res.status(200).json({ success: true, saleId: row?.id });
+      res.status(200).json({ success: true, ...(await recordWhopEvent(client.id, connectionId, req.body)) });
     } catch (error: any) {
       console.error("Error processing Whop webhook:", error);
       res.status(500).json({ error: "Failed to process webhook" });

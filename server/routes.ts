@@ -1,6 +1,6 @@
 import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { storage, db } from "./storage";
 import { appUrl } from "./config";
 import { insertClientSchema, insertEventSchema, insertAssetSchema, insertVaultAssetSchema, insertWebinarSchema, insertNotificationSchema, insertCalendarEntrySchema, sales as salesTable, salesSources, clientCalendarConnections, notificationRecipients, type User } from "@shared/schema";
@@ -2002,8 +2002,11 @@ export function registerApiRoutes(app: Express): void {
       }).safeParse(req.body);
       if (!payload.success) return res.status(400).json({ error: payload.error.issues[0]?.message ?? "Invalid sale" });
       const { amount, productName, customerEmail, customerName, saleDate, externalId, status, refundAmount } = payload.data;
-      const dedupeKey = externalId ? `highlevel:${externalId}` : null;
-      const inserted = await db.insert(salesTable).values({
+      // Without an external id, a retry sends the identical body, so its hash identifies the sale.
+      const dedupeKey = externalId
+        ? `highlevel:${externalId}`
+        : `highlevel:body:${createHash("sha256").update(req.rawBody ? (req.rawBody as Buffer) : JSON.stringify(req.body)).digest("hex")}`;
+      const row = {
         clientId: client.id,
         amount: amount.toFixed(2),
         productName: productName || null,
@@ -2015,10 +2018,18 @@ export function registerApiRoutes(app: Express): void {
         status: status === "completed" ? "paid" : status,
         metadata: { refundAmount },
         dedupeKey,
-      }).onConflictDoNothing({ target: [salesTable.clientId, salesTable.dedupeKey] }).returning({ id: salesTable.id });
-      const existing = inserted[0] || (dedupeKey
-        ? (await db.select({ id: salesTable.id }).from(salesTable).where(and(eq(salesTable.clientId, client.id), eq(salesTable.dedupeKey, dedupeKey))))[0]
-        : undefined);
+      };
+      const [prior] = await db.select({ id: salesTable.id }).from(salesTable)
+        .where(and(eq(salesTable.clientId, client.id), eq(salesTable.dedupeKey, dedupeKey)));
+      // A later delivery for the same sale (e.g. a refund) updates it instead of being dropped.
+      const [saved] = await db.insert(salesTable).values(row)
+        .onConflictDoUpdate({
+          target: [salesTable.clientId, salesTable.dedupeKey],
+          set: { status: row.status, metadata: row.metadata, amount: row.amount },
+        })
+        .returning({ id: salesTable.id });
+      const inserted = prior ? [] : [saved];
+      const existing = saved;
       await db.insert(salesSources).values({
         clientId: client.id, processor: "highlevel", configured: true,
         verified: true, lastSync: new Date(), error: null,
