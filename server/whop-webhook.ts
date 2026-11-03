@@ -4,14 +4,15 @@ import { db, storage } from "./storage";
 import { sales, salesSources } from "@shared/schema";
 import { verifyStandardWebhook } from "./webhook-signatures";
 import { connectionsFor, getConnection, markWebhook, webhookSecretOf } from "./integrations/connections";
-import { eventForProducts } from "./attribution";
+import { rematchClient } from "./registry/match";
 
 // Whop sends Standard Webhooks envelopes: { id, type, timestamp, data }.
 // Only completed payments and completed refunds change revenue; everything else is acknowledged and ignored.
 type WhopSale = {
   dedupeKey: string; externalId: string; amount: number; currency: string; status: "paid" | "refunded";
   refundAmount: number; productName: string | null; customerEmail: string | null; customerName: string | null; saleDate: Date;
-  productIds: string[]; // Whop product id first, then plan id: what event attribution matches on
+  productIds: string[]; // Whop product id first, then plan id
+  parentDedupeKey: string | null; // refunds: the payment they refund
 };
 const ids = (...values: unknown[]) => values.filter((v): v is string => typeof v === "string" && v.length > 0);
 
@@ -46,6 +47,7 @@ export function whopEventToSale(body: any): WhopSale | { remove: string } | null
       customerEmail: email(d.user?.email ?? d.customer_email ?? d.email), customerName: str(d.user?.name ?? d.user?.username, 300),
       saleDate: date(d.paid_at, d.created_at, body.timestamp),
       productIds: ids(d.product?.id, d.product_id, d.line_items?.[0]?.product_id, d.plan?.id, d.plan_id),
+      parentDedupeKey: null,
     };
   }
   if (type === "refund.created" || type === "refund.updated") {
@@ -60,6 +62,7 @@ export function whopEventToSale(body: any): WhopSale | { remove: string } | null
       customerEmail: email(d.payment?.user?.email ?? d.payment?.customer_email), customerName: str(d.payment?.user?.name, 300),
       saleDate: date(d.created_at, body.timestamp),
       productIds: ids(d.payment?.product?.id, d.payment?.product_id, d.payment?.plan?.id, d.payment?.plan_id),
+      parentDedupeKey: ids(d.payment?.id, d.payment_id)[0] ? `whop:${ids(d.payment?.id, d.payment_id)[0]}` : null,
     };
   }
   return null;
@@ -73,15 +76,14 @@ export async function recordWhopEvent(clientId: number, connectionId: number | n
     await db.delete(sales).where(and(eq(sales.clientId, clientId), eq(sales.dedupeKey, sale.remove)));
     return { removed: true as const };
   }
-  const eventPerformanceId = await eventForProducts(clientId, "whop", sale.productIds);
   const value = {
     clientId, amount: sale.amount.toFixed(2), currency: sale.currency, productName: sale.productName,
     customerEmail: sale.customerEmail, customerName: sale.customerName, saleDate: sale.saleDate,
     externalId: sale.externalId, source: "whop", status: sale.status,
     metadata: { refundAmount: sale.refundAmount }, dedupeKey: sale.dedupeKey,
     productId: sale.productIds[0] ?? null,
+    parentDedupeKey: sale.parentDedupeKey,
     ...(connectionId ? { connectionId } : {}),
-    ...(eventPerformanceId ? { eventPerformanceId } : {}),
   };
   // Whop retries deliveries, and the API sync sees the same payments, so the same payment or
   // refund updates its existing row.
@@ -93,6 +95,8 @@ export async function recordWhopEvent(clientId: number, connectionId: number | n
     target: [salesSources.clientId, salesSources.processor],
     set: { configured: true, verified: true, lastSync: new Date(), error: null },
   });
+  // Place the sale on its event right away instead of waiting for the next sync.
+  await rematchClient(clientId).catch((e) => console.error("[whop] rematch failed:", e.message));
   return { saleId: row?.id };
 }
 

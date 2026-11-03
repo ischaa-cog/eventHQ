@@ -5,12 +5,10 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
-import {
-  adSpendDaily, eventAttributionRules, eventPerformance, integrationConnections, sales, type User,
-} from "@shared/schema";
+import { adSpendDaily, eventPerformance, integrationConnections, sales, type User } from "@shared/schema";
 import { db } from "./storage";
 import { isAuthenticated } from "./auth";
-import { reapplyAttribution } from "./attribution";
+import { eventReports } from "./registry/metrics";
 import { syncStale } from "./integrations/sync";
 
 type GetUser = (req: any) => Promise<User | undefined>;
@@ -150,59 +148,56 @@ export async function moneySummary(clientId: number, from: string, to: string, t
   };
 }
 
-// Events that start in the range (or are running during it), each with its full attributed totals.
+// Events running in the range, each with its full totals. Registry events get their numbers from
+// the matcher (sales by product and date window, spend by landing page); a Main event also carries
+// its total including the Minis that feed it. Events not in the registry show what was typed into
+// Event Tracker, labeled as such.
 async function eventBreakdown(clientId: number, from: string, to: string) {
   const events = await db.select().from(eventPerformance).where(and(
     eq(eventPerformance.clientId, clientId),
-    sql`${eventPerformance.startDate}::date <= ${to}::date`,
-    sql`coalesce(${eventPerformance.endDate}, ${eventPerformance.startDate})::date >= ${from}::date`,
+    sql`coalesce(${eventPerformance.adsStart}, ${eventPerformance.startDate}::date) <= ${to}::date`,
+    sql`coalesce(${eventPerformance.postCartEnd}, ${eventPerformance.cartClose}, ${eventPerformance.endDate}::date, ${eventPerformance.startDate}::date) >= ${from}::date`,
   ));
   if (!events.length) return [];
-  const ids = events.map((e) => e.id);
-  const idList = sql.join(ids.map((id) => sql`${id}`), sql`, `);
-  const salesByEvent = new Map((await db.select({
-    eventId: sales.eventPerformanceId,
-    revenue: sql<string>`sum(${NET})`,
-    orders: sql<string>`count(*) filter (where ${sales.status} <> 'refunded')`,
-  }).from(sales).where(and(eq(sales.clientId, clientId), sql`${sales.eventPerformanceId} in (${idList})`))
-    .groupBy(sales.eventPerformanceId)).map((r) => [r.eventId, r]));
-  const spendByEvent = new Map((await db.select({
-    eventId: adSpendDaily.eventPerformanceId,
-    spend: sql<string>`sum(${adSpendDaily.spend})`,
-    leads: sql<string>`sum(${adSpendDaily.leads})`,
-  }).from(adSpendDaily).where(and(eq(adSpendDaily.clientId, clientId), sql`${adSpendDaily.eventPerformanceId} in (${idList})`))
-    .groupBy(adSpendDaily.eventPerformanceId)).map((r) => [r.eventId, r]));
-  const ruleCounts = new Map((await db.select({
-    eventId: eventAttributionRules.eventPerformanceId,
-    products: sql<string>`count(*) filter (where ${eventAttributionRules.kind} = 'product')`,
-    campaigns: sql<string>`count(*) filter (where ${eventAttributionRules.kind} = 'campaign')`,
-  }).from(eventAttributionRules).where(sql`${eventAttributionRules.eventPerformanceId} in (${idList})`)
-    .groupBy(eventAttributionRules.eventPerformanceId)).map((r) => [r.eventId, r]));
-
+  const registered = events.filter((e) => e.funnelRole);
+  const reports = registered.length ? await eventReports(clientId, registered.map((e) => e.id)) : [];
+  const byId = new Map(reports.map((r) => [r.id, r]));
   return events.map((e) => {
-    const s = salesByEvent.get(e.id);
-    const a = spendByEvent.get(e.id);
-    const rules = ruleCounts.get(e.id);
-    const linkedProducts = num(rules?.products);
-    const linkedCampaigns = num(rules?.campaigns);
-    // Linked data wins; otherwise show what was typed into Event Tracker.
-    const revenue = linkedProducts ? round2(num(s?.revenue)) : round2(num(e.totalRevenue));
-    const adSpend = linkedCampaigns ? round2(num(a?.spend)) : round2(num(e.adSpend));
+    const r = byId.get(e.id);
     const registrants = e.totalRegistrants ?? 0;
     const attendees = e.totalAttendees ?? 0;
+    if (r) {
+      const n = r.withMinis ?? r.own;
+      return {
+        id: e.id, registryId: r.registryId, title: e.title, type: e.eventType, role: r.role, feedsIntoId: r.feedsIntoId,
+        startDate: e.startDate, endDate: e.endDate,
+        revenue: n.netRevenue, adSpend: n.adSpend, profit: round2(n.netRevenue - n.adSpend), roas: n.roas,
+        orders: n.orders, buyers: n.buyers, optIns: n.optIns, costPerOptIn: n.costPerOptIn,
+        includesMinis: !!r.withMinis && r.miniIds.length > 0, miniCount: r.miniIds.length,
+        revenueSource: "registry" as const, spendSource: "registry" as const,
+        registrants, attendees, peopleAtPitch: e.peopleAtPitch ?? 0,
+        showUpRate: registrants > 0 ? round2((attendees / registrants) * 100) : null,
+        costPerRegistrant: registrants > 0 && n.adSpend > 0 ? round2(n.adSpend / registrants) : null,
+        leads: n.adLeads,
+      };
+    }
+    const revenue = round2(num(e.totalRevenue));
+    const adSpend = round2(num(e.adSpend));
     return {
-      id: e.id, title: e.title, type: e.eventType, startDate: e.startDate, endDate: e.endDate,
+      id: e.id, registryId: null, title: e.title, type: e.eventType, role: null, feedsIntoId: null,
+      startDate: e.startDate, endDate: e.endDate,
       revenue, adSpend, profit: round2(revenue - adSpend), roas: roas(revenue, adSpend),
-      orders: linkedProducts ? num(s?.orders) : null,
-      revenueSource: linkedProducts ? "synced" : "manual",
-      spendSource: linkedCampaigns ? "synced" : "manual",
-      linkedProducts, linkedCampaigns,
+      orders: null, buyers: null, optIns: null, costPerOptIn: null, includesMinis: false, miniCount: 0,
+      revenueSource: "manual" as const, spendSource: "manual" as const,
       registrants, attendees, peopleAtPitch: e.peopleAtPitch ?? 0,
       showUpRate: registrants > 0 ? round2((attendees / registrants) * 100) : null,
       costPerRegistrant: registrants > 0 && adSpend > 0 ? round2(adSpend / registrants) : null,
-      leads: linkedCampaigns ? num(a?.leads) : null,
+      leads: null,
     };
-  }).sort((x, y) => new Date(y.startDate).getTime() - new Date(x.startDate).getTime());
+  })
+    // Minis show inside their Main's total; list them only when their Main is outside the range.
+    .filter((e) => !(e.role === "mini" && e.feedsIntoId && events.some((m) => m.id === e.feedsIntoId)))
+    .sort((x, y) => new Date(y.startDate).getTime() - new Date(x.startDate).getTime());
 }
 
 async function sourceStatus(clientId: number) {
@@ -213,45 +208,7 @@ async function sourceStatus(clientId: number) {
   }));
 }
 
-// Products and campaigns seen for a client, for the "link to event" screen.
-async function attributionOptions(clientId: number) {
-  const products = await db.select({
-    provider: sql<string>`${sales.source}`,
-    productId: sql<string>`${sales.productId}`,
-    productName: sql<string>`max(${sales.productName})`,
-    revenue: sql<string>`sum(${NET})`,
-    orders: sql<string>`count(*)`,
-    lastSale: sql<string>`max(${sales.saleDate})`,
-  }).from(sales).where(and(eq(sales.clientId, clientId), sql`${sales.productId} is not null`))
-    .groupBy(sales.source, sales.productId);
-  const campaigns = await db.select({
-    provider: adSpendDaily.provider,
-    campaignId: adSpendDaily.campaignId,
-    campaignName: sql<string>`max(${adSpendDaily.campaignName})`,
-    spend: sql<string>`sum(${adSpendDaily.spend})`,
-    firstDay: sql<string>`min(${adSpendDaily.date})::text`,
-    lastDay: sql<string>`max(${adSpendDaily.date})::text`,
-  }).from(adSpendDaily).where(eq(adSpendDaily.clientId, clientId))
-    .groupBy(adSpendDaily.provider, adSpendDaily.campaignId);
-  const rules = await db.select().from(eventAttributionRules).where(eq(eventAttributionRules.clientId, clientId));
-  return {
-    rules,
-    products: products.map((p) => ({ ...p, revenue: round2(num(p.revenue)), orders: num(p.orders) }))
-      .sort((a, b) => b.revenue - a.revenue),
-    campaigns: campaigns.map((c) => ({ ...c, spend: round2(num(c.spend)) })).sort((a, b) => b.spend - a.spend),
-  };
-}
-
-const ruleSchema = z.object({
-  eventPerformanceId: z.number().int().positive(),
-  kind: z.enum(["product", "campaign"]),
-  provider: z.string().trim().min(1).max(40),
-  matchValue: z.string().trim().min(1).max(300),
-  label: z.string().trim().max(500).nullish(),
-});
-
 export function registerMoneyRoutes(app: Express, getRequestUser: GetUser) {
-  const isStaff = (u: User | undefined) => u?.role === "owner" || u?.role === "agency_admin" || u?.role === "team_member";
   const clientIdOf = (req: Request) => Number(req.params.clientId);
 
   app.get("/api/clients/:clientId/money-summary", isAuthenticated, async (req, res) => {
@@ -276,51 +233,6 @@ export function registerMoneyRoutes(app: Express, getRequestUser: GetUser) {
     } catch (error: any) {
       res.status(502).json({ error: error.message || "Refresh failed" });
     }
-  });
-
-  app.get("/api/clients/:clientId/attribution", isAuthenticated, async (req, res) => {
-    if (!isStaff(await getRequestUser(req))) return res.status(403).json({ error: "Forbidden" });
-    res.json(await attributionOptions(clientIdOf(req)));
-  });
-
-  // Links a product or campaign to an event. Linking something already linked moves it.
-  app.put("/api/clients/:clientId/attribution", isAuthenticated, async (req, res) => {
-    if (!isStaff(await getRequestUser(req))) return res.status(403).json({ error: "Forbidden" });
-    const parsed = ruleSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid link" });
-    const clientId = clientIdOf(req);
-    const [event] = await db.select({ id: eventPerformance.id }).from(eventPerformance)
-      .where(and(eq(eventPerformance.id, parsed.data.eventPerformanceId), eq(eventPerformance.clientId, clientId)));
-    if (!event) return res.status(404).json({ error: "Event not found in this workspace" });
-    const value = { clientId, ...parsed.data, label: parsed.data.label ?? null };
-    const [rule] = await db.insert(eventAttributionRules).values(value)
-      .onConflictDoUpdate({
-        target: [eventAttributionRules.clientId, eventAttributionRules.kind, eventAttributionRules.provider, eventAttributionRules.matchValue],
-        set: { eventPerformanceId: value.eventPerformanceId, label: value.label },
-      }).returning();
-    res.json({ rule, retagged: await reapplyAttribution(clientId) });
-  });
-
-  app.delete("/api/clients/:clientId/attribution/:id", isAuthenticated, async (req, res) => {
-    if (!isStaff(await getRequestUser(req))) return res.status(403).json({ error: "Forbidden" });
-    const clientId = clientIdOf(req);
-    const [rule] = await db.delete(eventAttributionRules)
-      .where(and(eq(eventAttributionRules.id, Number(req.params.id)), eq(eventAttributionRules.clientId, clientId)))
-      .returning();
-    if (!rule) return res.status(404).json({ error: "Link not found" });
-    // Untag rows that were tagged through this link.
-    if (rule.kind === "product") {
-      await db.update(sales).set({ eventPerformanceId: null }).where(and(
-        eq(sales.clientId, clientId), eq(sales.source, rule.provider), eq(sales.productId, rule.matchValue),
-        eq(sales.eventPerformanceId, rule.eventPerformanceId),
-      ));
-    } else {
-      await db.update(adSpendDaily).set({ eventPerformanceId: null }).where(and(
-        eq(adSpendDaily.clientId, clientId), eq(adSpendDaily.provider, rule.provider), eq(adSpendDaily.campaignId, rule.matchValue),
-        eq(adSpendDaily.eventPerformanceId, rule.eventPerformanceId),
-      ));
-    }
-    res.json({ success: true });
   });
 
   // Daily scheduled sync (vercel.json / build output crons). With CRON_SECRET set, Vercel sends it

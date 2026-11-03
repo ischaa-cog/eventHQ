@@ -1,19 +1,18 @@
 // Pulls sales and ad spend from each client's connected providers into `sales` and `ad_spend_daily`.
 // Every row has a stable key per provider record, so re-running a sync (or a webhook delivering the
 // same payment) updates rows instead of adding duplicates. Sales are tagged with the event that sells
-// their product, and spend with the event its campaign belongs to (event_attribution_rules).
+// After each sync the registry matcher (server/registry/match.ts) places every row on its event.
 import { createHmac } from "crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import {
-  adSpendDaily, eventAttributionRules, integrationConnections, sales, salesSources,
-  type IntegrationConnection,
-} from "@shared/schema";
+import { adSpendDaily, integrationConnections, optIns, sales, salesSources, type IntegrationConnection } from "@shared/schema";
 import { db } from "../storage";
 import { whopEventToSale } from "../whop-webhook";
 import { credentialsOf, markFailed, markSynced } from "./connections";
+import { rematchClient } from "../registry/match";
+import { normalizeUrl } from "../registry/normalize";
 
 export type SyncOptions = { days?: number; deadline?: number; fetchImpl?: typeof fetch };
-export type SyncResult = { provider: string; sales: number; refunds: number; spendRows: number; complete: boolean };
+export type SyncResult = { provider: string; sales: number; refunds: number; spendRows: number; optIns: number; complete: boolean };
 
 const DAY_MS = 86_400_000;
 const MAX_DAYS = 400;
@@ -32,6 +31,7 @@ export type SaleRecord = {
   customerEmail: string | null;
   customerName: string | null;
   saleDate: Date;
+  parentDedupeKey?: string | null; // refunds: the original payment's key
 };
 
 const str = (v: unknown, max = 500) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -62,39 +62,25 @@ async function getJson(fetchImpl: typeof fetch, url: string, headers: Record<str
 
 // ---------- Saving ----------
 
-async function productRules(clientId: number, provider: string): Promise<Map<string, number>> {
-  const rows = await db.select().from(eventAttributionRules).where(and(
-    eq(eventAttributionRules.clientId, clientId),
-    eq(eventAttributionRules.kind, "product"),
-    eq(eventAttributionRules.provider, provider),
-  ));
-  return new Map(rows.map((r) => [r.matchValue, r.eventPerformanceId]));
-}
-
 export async function saveSales(connection: IntegrationConnection, records: SaleRecord[]): Promise<number> {
   if (!records.length) return 0;
-  const rules = await productRules(connection.clientId, connection.provider);
-  const rows = records.map((r) => {
-    const ids = r.productIds?.length ? r.productIds : r.productId ? [r.productId] : [];
-    const eventId = ids.map((id) => rules.get(id)).find((id) => id !== undefined) ?? null;
-    return {
-      clientId: connection.clientId,
-      connectionId: connection.id,
-      source: connection.provider,
-      dedupeKey: r.dedupeKey,
-      externalId: r.externalId,
-      amount: r.amount.toFixed(2),
-      currency: r.currency,
-      status: r.status,
-      metadata: { refundAmount: r.refundAmount },
-      productId: r.productId,
-      productName: r.productName,
-      customerEmail: r.customerEmail,
-      customerName: r.customerName,
-      saleDate: r.saleDate,
-      eventPerformanceId: eventId,
-    };
-  });
+  const rows = records.map((r) => ({
+    clientId: connection.clientId,
+    connectionId: connection.id,
+    source: connection.provider,
+    dedupeKey: r.dedupeKey,
+    externalId: r.externalId,
+    amount: r.amount.toFixed(2),
+    currency: r.currency,
+    status: r.status,
+    metadata: { refundAmount: r.refundAmount },
+    productId: r.productId,
+    productName: r.productName,
+    customerEmail: r.customerEmail,
+    customerName: r.customerName,
+    saleDate: r.saleDate,
+    parentDedupeKey: r.parentDedupeKey ?? null,
+  }));
   for (let i = 0; i < rows.length; i += 200) {
     await db.insert(sales).values(rows.slice(i, i + 200)).onConflictDoUpdate({
       target: [sales.clientId, sales.dedupeKey],
@@ -109,8 +95,7 @@ export async function saveSales(connection: IntegrationConnection, records: Sale
         customerName: sql`excluded.customer_name`,
         saleDate: sql`excluded.sale_date`,
         connectionId: sql`excluded.connection_id`,
-        // Keep an event someone assigned by hand when no rule matches.
-        eventPerformanceId: sql`coalesce(excluded.event_performance_id, ${sales.eventPerformanceId})`,
+        parentDedupeKey: sql`excluded.parent_dedupe_key`,
       },
     });
   }
@@ -167,7 +152,7 @@ export function whopRecords(payments: any[], refunds: any[]): { records: SaleRec
       dedupeKey: sale.dedupeKey, externalId: sale.externalId, amount: sale.amount, currency: sale.currency,
       status: sale.status, refundAmount: sale.refundAmount, productId: sale.productIds[0] ?? null,
       productIds: sale.productIds, productName: sale.productName, customerEmail: sale.customerEmail,
-      customerName: sale.customerName, saleDate: sale.saleDate,
+      customerName: sale.customerName, saleDate: sale.saleDate, parentDedupeKey: sale.parentDedupeKey,
     });
   }
   return { records, remove };
@@ -218,7 +203,7 @@ export function fanbasisRecords(transactions: any[]): SaleRecord[] {
       if (!Number.isFinite(refund) || refund <= 0) continue;
       out.push({
         ...base, dedupeKey: `fanbasis-refund:${r.id}`, externalId: String(r.id), amount: refund, status: "refunded",
-        refundAmount: refund, saleDate: new Date(r.created_at ?? t.transaction_date),
+        refundAmount: refund, saleDate: new Date(r.created_at ?? t.transaction_date), parentDedupeKey: `fanbasis:${t.id}`,
       });
     }
   }
@@ -293,7 +278,27 @@ export function stripeExcluder(settings: unknown): (description: string | null) 
   return (description) => !!description && patterns.some((r) => r.test(description));
 }
 
-export function stripeRecords(charges: any[], sessions: any[], isExcluded: (d: string | null) => boolean = stripeExcluder(null)): { records: SaleRecord[]; skipped: number } {
+// Product id -> product name, as the team sees it in Stripe. The registry matches on these names.
+async function stripeProductNames(f: typeof fetch, key: string, deadline?: number): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  let startingAfter: string | undefined;
+  for (let page = 0; page < 50; page++) {
+    guard(deadline);
+    const url = new URL("https://api.stripe.com/v1/products");
+    url.searchParams.set("limit", "100");
+    if (startingAfter) url.searchParams.set("starting_after", startingAfter);
+    const body = await getJson(f, url.toString(), { Authorization: `Bearer ${key}` }, "Stripe products");
+    for (const p of body.data ?? []) if (p.id && p.name) names.set(p.id, String(p.name));
+    if (!body.has_more || !body.data?.length) break;
+    startingAfter = body.data[body.data.length - 1].id;
+  }
+  return names;
+}
+
+export function stripeRecords(
+  charges: any[], sessions: any[], isExcluded: (d: string | null) => boolean = stripeExcluder(null),
+  productNames: Map<string, string> = new Map(),
+): { records: SaleRecord[]; skipped: number } {
   // Refunds are listed separately (stripeRefundRecords) so refunds of older charges are not missed.
   // Checkout sessions say what was bought; match them to charges through the payment intent.
   const productByIntent = new Map<string, { id: string | null; name: string | null }>();
@@ -327,7 +332,7 @@ export function stripeRecords(charges: any[], sessions: any[], isExcluded: (d: s
     const priceId = invoiceLine?.price?.id ?? null;
     const base = {
       currency, productId, productIds: [productId, priceId].filter((v): v is string => !!v),
-      productName: fromSession?.name ?? str(invoiceLine?.description) ?? str(c.description),
+      productName: (productId && productNames.get(productId)) ?? fromSession?.name ?? str(invoiceLine?.description) ?? str(c.description),
       customerEmail: email(c.billing_details?.email ?? c.receipt_email), customerName: str(c.billing_details?.name, 300),
     };
     records.push({ ...base, dedupeKey: `stripe:${c.id}`, externalId: c.id, amount, status: "paid", refundAmount: 0, saleDate: new Date(c.created * 1000) });
@@ -355,6 +360,7 @@ export function stripeRefundRecords(
     const description = str(expanded?.description, 200);
     out.push({
       dedupeKey: `stripe-refund:${r.id}`, externalId: r.id, amount, currency, status: "refunded", refundAmount: amount,
+      parentDedupeKey: chargeId ? `stripe:${chargeId}` : null,
       productId: charge?.productId ?? (description ? `desc:${description.toLowerCase()}` : null),
       productName: charge?.productName ?? description ?? "Stripe refund",
       customerEmail: charge?.customerEmail ?? email(expanded?.billing_details?.email ?? expanded?.receipt_email),
@@ -378,6 +384,11 @@ async function syncStripe(connection: IntegrationConnection, since: Date, opts: 
   let salesCount = 0;
   let refundCount = 0;
   const isExcluded = stripeExcluder(connection.settings);
+  const productNames = await stripeProductNames(f, secretKey, opts.deadline).catch((e) => {
+    if (e instanceof DeadlineReached) throw e;
+    console.warn(`[sync] Stripe products unavailable for connection ${connection.id}: ${e.message}`);
+    return new Map<string, string>();
+  });
   const fetchChunk = async (start: Date, end: Date) => {
     const charges = await stripeList(f, secretKey, "charges", { "expand[]": "data.invoice" }, start, end, opts.deadline);
     // A checkout session is created shortly before its charge; look a day further back.
@@ -389,7 +400,7 @@ async function syncStripe(connection: IntegrationConnection, since: Date, opts: 
           return [];
         })
       : [];
-    return stripeRecords(charges, sessions, isExcluded).records;
+    return stripeRecords(charges, sessions, isExcluded, productNames).records;
   };
   // Up to 5 chunks are fetched at once; the cursor only moves past chunks that are all saved.
   while (from.getTime() < Date.now()) {
@@ -431,10 +442,13 @@ function actionTotal(list: any[] | undefined, types: string[]): number {
   return Math.max(0, ...(list ?? []).filter((a) => types.includes(a.action_type)).map((a) => Number(a.value) || 0));
 }
 
-export function metaSpendRows(rows: any[]) {
+export function metaSpendRows(rows: any[], landing: Map<string, string | null> = new Map()) {
   return rows.map((r) => ({
     campaignId: String(r.campaign_id),
     campaignName: str(r.campaign_name),
+    adId: r.ad_id ? String(r.ad_id) : "",
+    adName: str(r.ad_name),
+    landingUrl: r.ad_id ? landing.get(String(r.ad_id)) ?? null : null,
     date: String(r.date_start),
     spend: Number(r.spend) || 0,
     currency: String(r.account_currency ?? "USD").toUpperCase(),
@@ -446,34 +460,63 @@ export function metaSpendRows(rows: any[]) {
   }));
 }
 
+// Where an ad sends people, from its creative. Lead-form ads have no page and come back null.
+export function adLandingUrl(ad: any): string | null {
+  const c = ad?.creative ?? {};
+  const oss = c.object_story_spec ?? {};
+  const candidates = [
+    oss.link_data?.link,
+    oss.link_data?.call_to_action?.value?.link,
+    oss.video_data?.call_to_action?.value?.link,
+    oss.template_data?.link,
+    ...((c.asset_feed_spec?.link_urls ?? []).map((u: any) => u?.website_url)),
+    c.link_url,
+  ];
+  const raw = candidates.find((u) => typeof u === "string" && /^https?:\/\//i.test(u));
+  return normalizeUrl(raw);
+}
+
 async function syncMeta(connection: IntegrationConnection, since: Date, opts: SyncOptions) {
   const { accessToken, appSecret } = credentialsOf(connection);
   const accountId = connection.externalAccountId.replace(/^act_/, "");
   if (!accessToken || !accountId) throw new Error("Meta access token or ad account id missing");
   const f = opts.fetchImpl ?? fetch;
   const secret = appSecret || process.env.META_APP_SECRET;
-  const params = new URLSearchParams({
-    level: "campaign",
+  const proof = secret ? createHmac("sha256", secret).update(accessToken).digest("hex") : null;
+  const auth = { Authorization: `Bearer ${accessToken}` };
+  const page = async (first: string) => {
+    const out: any[] = [];
+    let url: string | undefined = first;
+    for (let n = 0; url && n < 200; n++) {
+      guard(opts.deadline);
+      const body: any = await getJson(f, url, auth, "Meta");
+      out.push(...(body.data ?? []));
+      url = body.paging?.next;
+    }
+    return out;
+  };
+  const insightParams = new URLSearchParams({
+    level: "ad",
     time_increment: "1",
-    fields: "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,account_currency",
+    fields: "ad_id,ad_name,campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,account_currency",
     time_range: JSON.stringify({ since: since.toISOString().slice(0, 10), until: new Date().toISOString().slice(0, 10) }),
     limit: "500",
   });
-  if (secret) params.set("appsecret_proof", createHmac("sha256", secret).update(accessToken).digest("hex"));
-  let url: string | undefined = `https://graph.facebook.com/v21.0/act_${accountId}/insights?${params}`;
-  const raw: any[] = [];
-  for (let page = 0; url && page < 100; page++) {
+  if (proof) insightParams.set("appsecret_proof", proof);
+  const raw = (await page(`https://graph.facebook.com/v21.0/act_${accountId}/insights?${insightParams}`))
+    .filter((r) => Number(r.spend) > 0 || Number(r.impressions) > 0);
+  // Landing pages for the ads that spent, fetched in batches of 50 ids.
+  const adIds = Array.from(new Set(raw.map((r) => String(r.ad_id)).filter(Boolean)));
+  const landing = new Map<string, string | null>();
+  const creativeFields = "creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls{website_url}},link_url}";
+  for (let i = 0; i < adIds.length; i += 50) {
     guard(opts.deadline);
-    const body: any = await getJson(f, url, { Authorization: `Bearer ${accessToken}` }, "Meta insights");
-    raw.push(...(body.data ?? []));
-    url = body.paging?.next;
+    const q = new URLSearchParams({ ids: adIds.slice(i, i + 50).join(","), fields: `id,${creativeFields}` });
+    if (proof) q.set("appsecret_proof", proof);
+    const body = await getJson(f, `https://graph.facebook.com/v21.0/?${q}`, auth, "Meta ads");
+    for (const [id, ad] of Object.entries<any>(body)) landing.set(id, adLandingUrl(ad));
   }
-  const campaignRules = new Map((await db.select().from(eventAttributionRules).where(and(
-    eq(eventAttributionRules.clientId, connection.clientId),
-    eq(eventAttributionRules.kind, "campaign"),
-    eq(eventAttributionRules.provider, "meta"),
-  ))).map((r) => [r.matchValue, r.eventPerformanceId]));
-  const rows = metaSpendRows(raw).map((r) => ({
+  const rows = metaSpendRows(raw, landing).map((r) => ({
     ...r,
     spend: r.spend.toFixed(2),
     purchaseValue: r.purchaseValue.toFixed(2),
@@ -481,14 +524,15 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
     connectionId: connection.id,
     provider: "meta",
     accountId,
-    eventPerformanceId: campaignRules.get(r.campaignId) ?? null,
     updatedAt: new Date(),
   }));
   for (let i = 0; i < rows.length; i += 300) {
     await db.insert(adSpendDaily).values(rows.slice(i, i + 300)).onConflictDoUpdate({
-      target: [adSpendDaily.connectionId, adSpendDaily.campaignId, adSpendDaily.date],
+      target: [adSpendDaily.connectionId, adSpendDaily.campaignId, adSpendDaily.adId, adSpendDaily.date],
       set: {
         campaignName: sql`excluded.campaign_name`,
+        adName: sql`excluded.ad_name`,
+        landingUrl: sql`excluded.landing_url`,
         spend: sql`excluded.spend`,
         currency: sql`excluded.currency`,
         impressions: sql`excluded.impressions`,
@@ -496,12 +540,74 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
         leads: sql`excluded.leads`,
         purchases: sql`excluded.purchases`,
         purchaseValue: sql`excluded.purchase_value`,
-        eventPerformanceId: sql`coalesce(excluded.event_performance_id, ${adSpendDaily.eventPerformanceId})`,
         updatedAt: sql`excluded.updated_at`,
       },
     });
   }
   return { spendRows: rows.length };
+}
+
+// ---------- HighLevel opt-ins ----------
+// Private integration token for the sub-account, plus its location id. Form submissions carry
+// the page they were submitted on, which is how opt-ins match events. Pulled in 7-day windows,
+// oldest first, resumable like Stripe.
+
+export function highlevelOptIns(submissions: any[]) {
+  return submissions.map((s) => {
+    const page = s.others?.eventData?.page ?? {};
+    const pageUrl = normalizeUrl(page.url ?? s.others?.eventData?.url ?? s.others?.eventData?.documentURL);
+    return {
+      externalId: String(s.id),
+      email: email(s.email ?? s.others?.email),
+      pageUrl,
+      pageTitle: str(page.title, 300),
+      formId: str(s.formId, 100),
+      submittedAt: new Date(s.createdAt),
+    };
+  }).filter((r) => !Number.isNaN(r.submittedAt.getTime()));
+}
+
+async function syncHighLevel(connection: IntegrationConnection, since: Date, opts: SyncOptions) {
+  const { apiKey } = credentialsOf(connection);
+  const locationId = connection.externalAccountId;
+  if (!apiKey || !locationId) throw new Error("HighLevel token or location id missing");
+  const f = opts.fetchImpl ?? fetch;
+  // HighLevel's firewall rejects requests without a normal user agent.
+  const headers = { Authorization: `Bearer ${apiKey}`, Version: "2021-07-28", Accept: "application/json", "User-Agent": "eventhq-sync/1.0" };
+  const WINDOW = 7 * DAY_MS;
+  const cursor = connection.lastSyncCursor ? new Date(Number(connection.lastSyncCursor)) : null;
+  let from = cursor && cursor > since ? new Date(cursor.getTime() - 2 * DAY_MS) : since;
+  let saved = 0;
+  while (from.getTime() < Date.now()) {
+    const until = new Date(Math.min(from.getTime() + WINDOW, Date.now() + DAY_MS));
+    const rows: any[] = [];
+    for (let pageNo = 1; pageNo <= 100; pageNo++) {
+      guard(opts.deadline);
+      const url = new URL("https://services.leadconnectorhq.com/forms/submissions");
+      url.searchParams.set("locationId", locationId);
+      url.searchParams.set("limit", "100");
+      url.searchParams.set("page", String(pageNo));
+      url.searchParams.set("startAt", from.toISOString().slice(0, 10));
+      url.searchParams.set("endAt", until.toISOString().slice(0, 10));
+      const body = await getJson(f, url.toString(), headers, "HighLevel form submissions");
+      rows.push(...(body.submissions ?? []));
+      if (!body.meta?.nextPage || !(body.submissions ?? []).length) break;
+    }
+    const records = highlevelOptIns(rows).map((r) => ({
+      ...r, clientId: connection.clientId, connectionId: connection.id, provider: "highlevel",
+    }));
+    for (let i = 0; i < records.length; i += 300) {
+      await db.insert(optIns).values(records.slice(i, i + 300)).onConflictDoUpdate({
+        target: [optIns.connectionId, optIns.externalId],
+        set: { email: sql`excluded.email`, pageUrl: sql`excluded.page_url`, pageTitle: sql`excluded.page_title`, submittedAt: sql`excluded.submitted_at` },
+      });
+    }
+    saved += records.length;
+    await db.update(integrationConnections).set({ lastSyncCursor: String(until.getTime()) })
+      .where(eq(integrationConnections.id, connection.id));
+    from = until;
+  }
+  return { optIns: saved };
 }
 
 // ---------- Entry points ----------
@@ -511,15 +617,17 @@ export async function syncConnection(connection: IntegrationConnection, opts: Sy
   const days = Math.min(MAX_DAYS, opts.days ?? (connection.lastSyncAt ? 30 : 90));
   const since = new Date(Date.now() - days * DAY_MS);
   since.setUTCHours(0, 0, 0, 0);
-  const result: SyncResult = { provider: connection.provider, sales: 0, refunds: 0, spendRows: 0, complete: true };
+  const result: SyncResult = { provider: connection.provider, sales: 0, refunds: 0, spendRows: 0, optIns: 0, complete: true };
   try {
     if (connection.provider === "whop") Object.assign(result, await syncWhop(connection, since, opts));
     else if (connection.provider === "fanbasis") Object.assign(result, await syncFanbasis(connection, since, opts));
     else if (connection.provider === "stripe") Object.assign(result, await syncStripe(connection, since, opts));
     else if (connection.provider === "meta") Object.assign(result, await syncMeta(connection, since, opts));
-    else throw new Error(`${connection.provider} has no API sync; it reports by webhook.`);
+    else if (connection.provider === "highlevel") Object.assign(result, await syncHighLevel(connection, since, opts));
+    else throw new Error(`${connection.provider} has no API sync.`);
     await markSynced(connection.id);
-    if (connection.provider !== "meta") await markSourceHealthy(connection.clientId, connection.provider);
+    if (connection.provider !== "meta" && connection.provider !== "highlevel") await markSourceHealthy(connection.clientId, connection.provider);
+    await rematchClient(connection.clientId);
   } catch (error: any) {
     if (error instanceof DeadlineReached) {
       // Whatever was fetched before the time limit was not saved; the next run tries again.
@@ -539,7 +647,7 @@ export async function syncStale(opts: { clientId?: number; staleMinutes?: number
   const rows = await db.select().from(integrationConnections).where(eq(integrationConnections.status, "active"));
   const due = rows
     .filter((r) => (opts.clientId ? r.clientId === opts.clientId : true))
-    .filter((r) => r.provider !== "highlevel" && (!r.lastSyncAt || r.lastSyncAt < cutoff))
+    .filter((r) => !r.lastSyncAt || r.lastSyncAt < cutoff)
     .sort((a, b) => (a.lastSyncAt?.getTime() ?? 0) - (b.lastSyncAt?.getTime() ?? 0));
   const results: Array<SyncResult | { provider: string; connectionId: number; error: string }> = [];
   for (const row of due) {

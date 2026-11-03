@@ -1,5 +1,5 @@
 {
-  "id": "4b7d6652-8100-4303-84d8-b5bef7a918ee",
+  "id": "d3d43c6b-c938-4fa1-a02a-c56c6a5e89db",
   "prevId": "5b4ac31b-76ea-4164-989a-7391e94da078",
   "version": "7",
   "dialect": "postgresql",
@@ -194,6 +194,25 @@
           "primaryKey": false,
           "notNull": false
         },
+        "ad_id": {
+          "name": "ad_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "ad_name": {
+          "name": "ad_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "landing_url": {
+          "name": "landing_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "date": {
           "name": "date",
           "type": "date",
@@ -255,6 +274,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "match_status": {
+          "name": "match_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_note": {
+          "name": "match_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -264,8 +295,8 @@
         }
       },
       "indexes": {
-        "ad_spend_connection_campaign_date_idx": {
-          "name": "ad_spend_connection_campaign_date_idx",
+        "ad_spend_connection_ad_date_idx": {
+          "name": "ad_spend_connection_ad_date_idx",
           "columns": [
             {
               "expression": "connection_id",
@@ -275,6 +306,12 @@
             },
             {
               "expression": "campaign_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ad_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1042,6 +1079,18 @@
           "notNull": true,
           "default": true
         },
+        "event_code": {
+          "name": "event_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_products": {
+          "name": "default_products",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "onboarding_complete": {
           "name": "onboarding_complete",
           "type": "boolean",
@@ -1116,144 +1165,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.event_attribution_rules": {
-      "name": "event_attribution_rules",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_performance_id": {
-          "name": "event_performance_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "match_value": {
-          "name": "match_value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "event_attribution_unique_idx": {
-          "name": "event_attribution_unique_idx",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "match_value",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_event_attribution_event": {
-          "name": "idx_event_attribution_event",
-          "columns": [
-            {
-              "expression": "event_performance_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "event_attribution_rules_client_id_clients_id_fk": {
-          "name": "event_attribution_rules_client_id_clients_id_fk",
-          "tableFrom": "event_attribution_rules",
-          "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "event_attribution_rules_event_performance_id_event_performance_id_fk": {
-          "name": "event_attribution_rules_event_performance_id_event_performance_id_fk",
-          "tableFrom": "event_attribution_rules",
-          "tableTo": "event_performance",
-          "columnsFrom": [
-            "event_performance_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1485,6 +1396,124 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.event_offers": {
+      "name": "event_offers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_performance_id": {
+          "name": "event_performance_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_names": {
+          "name": "product_names",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price_text": {
+          "name": "price_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sold_through": {
+          "name": "sold_through",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "share_percent": {
+          "name": "share_percent",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'100'"
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_event_offers_event": {
+          "name": "idx_event_offers_event",
+          "columns": [
+            {
+              "expression": "event_performance_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "event_offers_client_id_clients_id_fk": {
+          "name": "event_offers_client_id_clients_id_fk",
+          "tableFrom": "event_offers",
+          "tableTo": "clients",
+          "columnsFrom": [
+            "client_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "event_offers_event_performance_id_event_performance_id_fk": {
+          "name": "event_offers_event_performance_id_event_performance_id_fk",
+          "tableFrom": "event_offers",
+          "tableTo": "event_performance",
+          "columnsFrom": [
+            "event_performance_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.event_performance": {
       "name": "event_performance",
       "schema": "",
@@ -1613,6 +1642,66 @@
           "notNull": true,
           "default": "'manual'"
         },
+        "registry_id": {
+          "name": "registry_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "funnel_role": {
+          "name": "funnel_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "feeds_into_id": {
+          "name": "feeds_into_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ads_start": {
+          "name": "ads_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cart_open": {
+          "name": "cart_open",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cart_close": {
+          "name": "cart_close",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "post_cart_end": {
+          "name": "post_cart_end",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "page_links": {
+          "name": "page_links",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "products": {
+          "name": "products",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ad_campaign_ids": {
+          "name": "ad_campaign_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -1670,6 +1759,27 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "event_perf_client_registry_id_idx": {
+          "name": "event_perf_client_registry_id_idx",
+          "columns": [
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "registry_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2869,6 +2979,253 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.opt_ins": {
+      "name": "opt_ins",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "page_url": {
+          "name": "page_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "page_title": {
+          "name": "page_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "form_id": {
+          "name": "form_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_performance_id": {
+          "name": "event_performance_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_status": {
+          "name": "match_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_note": {
+          "name": "match_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "opt_ins_connection_external_idx": {
+          "name": "opt_ins_connection_external_idx",
+          "columns": [
+            {
+              "expression": "connection_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_opt_ins_client_date": {
+          "name": "idx_opt_ins_client_date",
+          "columns": [
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "opt_ins_client_id_clients_id_fk": {
+          "name": "opt_ins_client_id_clients_id_fk",
+          "tableFrom": "opt_ins",
+          "tableTo": "clients",
+          "columnsFrom": [
+            "client_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "opt_ins_connection_id_integration_connections_id_fk": {
+          "name": "opt_ins_connection_id_integration_connections_id_fk",
+          "tableFrom": "opt_ins",
+          "tableTo": "integration_connections",
+          "columnsFrom": [
+            "connection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "opt_ins_event_performance_id_event_performance_id_fk": {
+          "name": "opt_ins_event_performance_id_event_performance_id_fk",
+          "tableFrom": "opt_ins",
+          "tableTo": "event_performance",
+          "columnsFrom": [
+            "event_performance_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.product_contract_values": {
+      "name": "product_contract_values",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_name": {
+          "name": "product_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "full_value": {
+          "name": "full_value",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "product_contract_client_name_idx": {
+          "name": "product_contract_client_name_idx",
+          "columns": [
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "product_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "product_contract_values_client_id_clients_id_fk": {
+          "name": "product_contract_values_client_id_clients_id_fk",
+          "tableFrom": "product_contract_values",
+          "tableTo": "clients",
+          "columnsFrom": [
+            "client_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.projections": {
       "name": "projections",
       "schema": "",
@@ -3057,6 +3414,36 @@
         },
         "product_id": {
           "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_dedupe_key": {
+          "name": "parent_dedupe_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_status": {
+          "name": "match_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_tier": {
+          "name": "match_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_offer_id": {
+          "name": "match_offer_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_note": {
+          "name": "match_note",
           "type": "text",
           "primaryKey": false,
           "notNull": false
