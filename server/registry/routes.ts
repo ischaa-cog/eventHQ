@@ -115,9 +115,10 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
     const contractValues = await db.select().from(productContractValues).where(eq(productContractValues.clientId, clientId));
     const reports = await eventReports(clientId);
     const [counts] = await db.select({
-      sales: sql<string>`(select count(*) from ${sales} where ${sales.clientId} = ${clientId} and ${sales.matchStatus} = 'unmatched')`,
-      spend: sql<string>`(select count(*) from ${adSpendDaily} where ${adSpendDaily.clientId} = ${clientId} and ${adSpendDaily.matchStatus} = 'unmatched' and ${adSpendDaily.spend} > 0)`,
-      optIns: sql<string>`(select count(*) from ${optIns} where ${optIns.clientId} = ${clientId} and ${optIns.matchStatus} = 'unmatched')`,
+      // Counted as groups (one per product name, page link or campaign), the way the Unmatched list shows them.
+      sales: sql<string>`(select count(distinct (${sales.source}, ${sales.productName})) from ${sales} where ${sales.clientId} = ${clientId} and ${sales.matchStatus} = 'unmatched')`,
+      spend: sql<string>`(select count(distinct (coalesce(${adSpendDaily.landingUrl}, ''), ${adSpendDaily.campaignId})) from ${adSpendDaily} where ${adSpendDaily.clientId} = ${clientId} and ${adSpendDaily.matchStatus} = 'unmatched' and ${adSpendDaily.spend} > 0)`,
+      optIns: sql<string>`(select count(distinct coalesce(${optIns.pageUrl}, '')) from ${optIns} where ${optIns.clientId} = ${clientId} and ${optIns.matchStatus} = 'unmatched')`,
       conflicts: sql<string>`(select count(*) from ${sales} where ${sales.clientId} = ${clientId} and ${sales.matchStatus} = 'conflict')
         + (select count(*) from ${adSpendDaily} where ${adSpendDaily.clientId} = ${clientId} and ${adSpendDaily.matchStatus} = 'conflict')
         + (select count(*) from ${optIns} where ${optIns.clientId} = ${clientId} and ${optIns.matchStatus} = 'conflict')`,

@@ -112,7 +112,7 @@ async function main() {
   }
   const { db } = await import("../server/storage");
   const { clients } = await import("@shared/schema");
-  const { saveConnection } = await import("../server/integrations/connections");
+  const { saveConnection, getConnection } = await import("../server/integrations/connections");
   const { syncConnection } = await import("../server/integrations/sync");
   const all = await db.select({ id: clients.id, name: clients.name }).from(clients);
   for (const m of mappings) {
@@ -125,8 +125,9 @@ async function main() {
       console.log(`connected ${p.displayName} to "${client.name}"`);
       if (flag("sync")) {
         try {
+          // Reload the connection before each run so a cut-off sync resumes from its saved cursor.
           let r = await syncConnection(row, { deadline: Date.now() + 120_000 });
-          while (!r.complete) r = await syncConnection(row, { deadline: Date.now() + 120_000 });
+          while (!r.complete) r = await syncConnection((await getConnection(row.id))!, { deadline: Date.now() + 120_000 });
           console.log(`   synced: ${r.sales} sales, ${r.refunds} refunds, ${r.spendRows} ad-days, ${r.optIns} opt-ins`);
         } catch (e: any) { console.log(`   sync failed: ${e.message}`); }
       }
