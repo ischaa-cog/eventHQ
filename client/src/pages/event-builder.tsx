@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useFeatures } from "@/hooks/use-features";
 import { Loader2, ArrowRight, ArrowLeft, Wand2, CheckCircle, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { AssetTemplate } from "@shared/schema";
@@ -394,6 +395,8 @@ export default function EventBuilderPage() {
       return response.json();
     },
   });
+
+  const { aiGeneration } = useFeatures();
 
   const generateMutation = useMutation({
     mutationFn: async ({ eventId, assetTypes }: { eventId: number; assetTypes: string[] }) => {
@@ -907,9 +910,15 @@ export default function EventBuilderPage() {
                   <Button variant="ghost" onClick={() => setActiveTab("audience")} data-testid="button-back-audience">
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back
                   </Button>
-                  <div className="flex items-center gap-4">
-                    <p className="text-xs text-muted-foreground">Estimated time: ~2 minutes</p>
-                    <Button size="lg" onClick={handleGenerate} disabled={isGenerating || generationSuccess} className="min-w-[200px]" data-testid="button-generate">
+                  <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-4">
+                    {aiGeneration ? (
+                      <p className="text-xs text-muted-foreground">Estimated time: ~2 minutes</p>
+                    ) : (
+                      <p className="max-w-xs text-right text-xs text-muted-foreground" data-testid="text-generation-paused">
+                        AI asset generation is paused while it moves to a more reliable setup.
+                      </p>
+                    )}
+                    <Button size="lg" onClick={handleGenerate} disabled={!aiGeneration || isGenerating || generationSuccess} className="min-w-[200px]" data-testid="button-generate">
                       {generationSuccess ? (
                         <>
                           <CheckCircle className="mr-2 h-4 w-4" /> Redirecting to Assets...

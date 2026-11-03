@@ -9,11 +9,19 @@ function getSender(): string {
 }
 
 async function deliverEmail(message: Record<string, unknown>): Promise<void> {
-  const response = await new ReplitConnectors().proxy('resend', '/emails', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...message, from: getSender() }),
-  });
+  const body = JSON.stringify({ ...message, from: getSender() });
+  // RESEND_API_KEY calls Resend directly (works anywhere); otherwise fall back to the Replit connector.
+  const response = process.env.RESEND_API_KEY
+    ? await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+        body,
+      })
+    : await new ReplitConnectors().proxy('resend', '/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
   if (!response.ok) {
     // Do not log or return provider response bodies; they may contain message content.
     throw new Error(`Email provider rejected the message (HTTP ${response.status}).`);

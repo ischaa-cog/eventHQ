@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { format } from "date-fns";
+import { useFeatures } from "@/hooks/use-features";
 import {
   Select,
   SelectContent,
@@ -53,6 +54,7 @@ export default function SendNotificationsPage() {
   const [category, setCategory] = useState("custom");
   const [selectedClients, setSelectedClients] = useState<number[]>([]);
   const [sendEmail, setSendEmail] = useState(true);
+  const emailAvailable = useFeatures().email;
 
   const { data: clients = [] } = useQuery<Client[]>({
     queryKey: ["/api/clients"],
@@ -123,7 +125,7 @@ export default function SendNotificationsPage() {
       body: body.trim(),
       category,
       clientIds: selectedClients,
-      sendEmail,
+      sendEmail: sendEmail && emailAvailable,
     });
   };
 
@@ -199,7 +201,7 @@ export default function SendNotificationsPage() {
                         />
                       </div>
 
-                      <div className="flex items-center justify-between pt-2">
+                      {emailAvailable && <div className="flex items-center justify-between pt-2">
                         <div className="flex items-center space-x-2">
                           <Switch
                             id="send-email"
@@ -216,7 +218,7 @@ export default function SendNotificationsPage() {
                             {clientsWithEmail.filter((c) => selectedClients.includes(c.id)).length} recipient{clientsWithEmail.filter((c) => selectedClients.includes(c.id)).length !== 1 ? "s" : ""} with email
                           </span>
                         )}
-                      </div>
+                      </div>}
                     </CardContent>
                   </Card>
                 </div>

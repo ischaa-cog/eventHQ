@@ -30,3 +30,17 @@ export function checkConfig(): void {
     console.warn("[config] SESSION_SECRET is shorter than 32 characters; use a long random value.");
   }
 }
+
+// Which optional features can actually work in this deployment. The UI hides what is off.
+export function features() {
+  const onVercel = !!process.env.VERCEL;
+  return {
+    // Generation runs after the response is sent; Vercel can stop the function mid-job, so it stays
+    // off there until it moves to a durable queue. ENABLE_AI_GENERATION=1 overrides for testing.
+    aiGeneration: !!process.env.OPENAI_API_KEY && (!onVercel || process.env.ENABLE_AI_GENERATION === "1"),
+    neoChat: !!process.env.OPENAI_API_KEY,
+    email: !!process.env.MAIL_FROM && (!!process.env.RESEND_API_KEY || !!process.env.REPLIT_CONNECTORS_HOSTNAME),
+    googleDrive: !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET,
+    metaOAuth: !!process.env.META_APP_ID && !!process.env.META_APP_SECRET,
+  };
+}

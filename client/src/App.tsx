@@ -8,28 +8,28 @@ import { useAuth } from "@/hooks/useAuth";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import ClientLogin from "@/pages/client-login";
-import DashboardPage from "@/pages/dashboard";
-import React, { Component, ErrorInfo, ReactNode } from "react";
+const DashboardPage = lazy(() => import("@/pages/dashboard"));
+import React, { Component, ErrorInfo, ReactNode, Suspense, lazy } from "react";
 
-import ClientsPage from "@/pages/clients";
-import ClientWorkspacePage from "@/pages/client-workspace";
-import AssetsPage from "@/pages/assets";
-import ClientProjectionsPage from "@/pages/projections";
-import ClientDashboard from "@/pages/client-dashboard";
-import EventTrackerPage from "@/pages/event-tracker";
-import TrainingLabPage from "@/pages/training-lab";
-import MarketingCalendarPage from "@/pages/marketing-calendar";
-import NotificationsPage from "@/pages/notifications";
-import SendNotificationsPage from "@/pages/send-notifications";
-import NeoKnowledgePage from "@/pages/neo-knowledge";
-import ActivityLogPage from "@/pages/activity-log";
-import AdCampaignsPage from "@/pages/ad-campaigns";
-import ClientNotificationsPage from "@/pages/client-notifications";
-import ClientOnboardingPage from "@/pages/client-onboarding";
+const ClientsPage = lazy(() => import("@/pages/clients"));
+const ClientWorkspacePage = lazy(() => import("@/pages/client-workspace"));
+const AssetsPage = lazy(() => import("@/pages/assets"));
+const ClientProjectionsPage = lazy(() => import("@/pages/projections"));
+const ClientDashboard = lazy(() => import("@/pages/client-dashboard"));
+const EventTrackerPage = lazy(() => import("@/pages/event-tracker"));
+const TrainingLabPage = lazy(() => import("@/pages/training-lab"));
+const MarketingCalendarPage = lazy(() => import("@/pages/marketing-calendar"));
+const NotificationsPage = lazy(() => import("@/pages/notifications"));
+const SendNotificationsPage = lazy(() => import("@/pages/send-notifications"));
+const NeoKnowledgePage = lazy(() => import("@/pages/neo-knowledge"));
+const ActivityLogPage = lazy(() => import("@/pages/activity-log"));
+const AdCampaignsPage = lazy(() => import("@/pages/ad-campaigns"));
+const ClientNotificationsPage = lazy(() => import("@/pages/client-notifications"));
+const ClientOnboardingPage = lazy(() => import("@/pages/client-onboarding"));
 import AccessDeniedPage from "@/pages/access-denied";
-import LiveSalesFeedPage from "@/pages/live-sales-feed";
-import TalkToNeoPage from "@/pages/talk-to-neo";
-import AdminPage from "@/pages/admin";
+const LiveSalesFeedPage = lazy(() => import("@/pages/live-sales-feed"));
+const TalkToNeoPage = lazy(() => import("@/pages/talk-to-neo"));
+const AdminPage = lazy(() => import("@/pages/admin"));
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -225,13 +225,25 @@ function Router() {
   );
 }
 
+function PageLoading() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-live="polite">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
+      <span className="sr-only">Loading</span>
+    </div>
+  );
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <Toaster />
-          <Router />
+          {/* Pages load on demand, so a phone downloads only the screen it opens. */}
+          <Suspense fallback={<PageLoading />}>
+            <Router />
+          </Suspense>
         </TooltipProvider>
       </QueryClientProvider>
     </ErrorBoundary>

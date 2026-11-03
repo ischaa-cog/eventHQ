@@ -2,7 +2,7 @@ import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { createHash, randomUUID } from "crypto";
 import { storage, db } from "./storage";
-import { appUrl } from "./config";
+import { appUrl, features } from "./config";
 import { insertClientSchema, insertEventSchema, insertAssetSchema, insertVaultAssetSchema, insertWebinarSchema, insertNotificationSchema, insertCalendarEntrySchema, sales as salesTable, salesSources, clientCalendarConnections, notificationRecipients, type User } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import OpenAI from "openai";
@@ -186,6 +186,7 @@ export function registerApiRoutes(app: Express): void {
   // calling them directly. Each client-scoped handler still enforces assignment.
   const clientPortalActions: Array<{ method: string; path: RegExp }> = [
     { method: "GET", path: /^\/api\/auth\/user\/?$/ },
+    { method: "GET", path: /^\/api\/features\/?$/ },
     { method: "GET", path: /^\/api\/clients\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+(?:\/headshot)?\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/events\/?$/ },
@@ -252,6 +253,9 @@ export function registerApiRoutes(app: Express): void {
     }
     return forbidden(res);
   });
+
+  // What optional features this deployment can run, so the UI can hide the rest. No secrets.
+  app.get("/api/features", isAuthenticated, (_req, res) => res.json(features()));
 
   // Auth routes
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
@@ -1094,6 +1098,9 @@ export function registerApiRoutes(app: Express): void {
 
   // GENERATION - Endpoint to trigger asset generation
   app.post("/api/events/:eventId/generate", isAuthenticated, async (req: any, res) => {
+    if (!features().aiGeneration) {
+      return res.status(503).json({ error: "AI asset generation is paused while it moves to a more reliable setup." });
+    }
     try {
       const user = await getRequestUser(req);
       const eventId = parseInt(req.params.eventId);
@@ -1171,6 +1178,9 @@ export function registerApiRoutes(app: Express): void {
 
   // Template-based generation endpoint
   app.post("/api/events/:eventId/generate-from-templates", isAuthenticated, async (req: any, res) => {
+    if (!features().aiGeneration) {
+      return res.status(503).json({ error: "AI asset generation is paused while it moves to a more reliable setup." });
+    }
     try {
       const user = await getRequestUser(req);
       const eventId = parseInt(req.params.eventId);
@@ -2174,7 +2184,9 @@ export function registerApiRoutes(app: Express): void {
         return res.status(400).json({ error: "Agency admin must be assigned to an agency" });
       }
       
-      const { subject, body, category, clientIds, sendEmail } = req.body;
+      const { subject, body, category, clientIds } = req.body;
+      // Email is skipped, not attempted, when this deployment cannot send it.
+      const sendEmail = !!req.body.sendEmail && features().email;
       
       if (!subject || !body || !clientIds || !Array.isArray(clientIds) || clientIds.length === 0) {
         return res.status(400).json({ error: "subject, body, and clientIds are required" });
