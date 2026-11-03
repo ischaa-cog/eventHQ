@@ -495,56 +495,72 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
     }
     return out;
   };
-  const insightParams = new URLSearchParams({
-    level: "ad",
-    time_increment: "1",
-    fields: "ad_id,ad_name,campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,account_currency",
-    time_range: JSON.stringify({ since: since.toISOString().slice(0, 10), until: new Date().toISOString().slice(0, 10) }),
-    limit: "500",
-  });
-  if (proof) insightParams.set("appsecret_proof", proof);
-  const raw = (await page(`https://graph.facebook.com/v21.0/act_${accountId}/insights?${insightParams}`))
-    .filter((r) => Number(r.spend) > 0 || Number(r.impressions) > 0);
-  // Landing pages for the ads that spent, fetched in batches of 50 ids.
-  const adIds = Array.from(new Set(raw.map((r) => String(r.ad_id)).filter(Boolean)));
+  // One-week windows, four at a time, saved as each arrives: Meta answers large ad-level
+  // requests slowly, so small windows keep every request well inside the time limit.
+  const WEEK = 7 * DAY_MS;
+  const windows: Array<[string, string]> = [];
+  for (let t = since.getTime(); t <= Date.now(); t += WEEK) {
+    windows.push([new Date(t).toISOString().slice(0, 10), new Date(Math.min(t + WEEK - DAY_MS, Date.now())).toISOString().slice(0, 10)]);
+  }
   const landing = new Map<string, string | null>();
   const creativeFields = "creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls{website_url}},link_url}";
-  for (let i = 0; i < adIds.length; i += 50) {
-    guard(opts.deadline);
-    const q = new URLSearchParams({ ids: adIds.slice(i, i + 50).join(","), fields: `id,${creativeFields}` });
-    if (proof) q.set("appsecret_proof", proof);
-    const body = await getJson(f, `https://graph.facebook.com/v21.0/?${q}`, auth, "Meta ads");
-    for (const [id, ad] of Object.entries<any>(body)) landing.set(id, adLandingUrl(ad));
-  }
-  const rows = metaSpendRows(raw, landing).map((r) => ({
-    ...r,
-    spend: r.spend.toFixed(2),
-    purchaseValue: r.purchaseValue.toFixed(2),
-    clientId: connection.clientId,
-    connectionId: connection.id,
-    provider: "meta",
-    accountId,
-    updatedAt: new Date(),
-  }));
-  for (let i = 0; i < rows.length; i += 300) {
-    await db.insert(adSpendDaily).values(rows.slice(i, i + 300)).onConflictDoUpdate({
-      target: [adSpendDaily.connectionId, adSpendDaily.campaignId, adSpendDaily.adId, adSpendDaily.date],
-      set: {
-        campaignName: sql`excluded.campaign_name`,
-        adName: sql`excluded.ad_name`,
-        landingUrl: sql`excluded.landing_url`,
-        spend: sql`excluded.spend`,
-        currency: sql`excluded.currency`,
-        impressions: sql`excluded.impressions`,
-        clicks: sql`excluded.clicks`,
-        leads: sql`excluded.leads`,
-        purchases: sql`excluded.purchases`,
-        purchaseValue: sql`excluded.purchase_value`,
-        updatedAt: sql`excluded.updated_at`,
-      },
+  const landingFor = async (ids: string[]) => {
+    const missing = ids.filter((id) => !landing.has(id));
+    for (let i = 0; i < missing.length; i += 50) {
+      guard(opts.deadline);
+      const q = new URLSearchParams({ ids: missing.slice(i, i + 50).join(","), fields: `id,${creativeFields}` });
+      if (proof) q.set("appsecret_proof", proof);
+      const body = await getJson(f, `https://graph.facebook.com/v21.0/?${q}`, auth, "Meta ads");
+      for (const [id, ad] of Object.entries<any>(body)) landing.set(id, adLandingUrl(ad));
+    }
+  };
+  const fetchWindow = async ([from, to]: [string, string]) => {
+    const insightParams = new URLSearchParams({
+      level: "ad",
+      time_increment: "1",
+      fields: "ad_id,ad_name,campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,account_currency",
+      time_range: JSON.stringify({ since: from, until: to }),
+      filtering: JSON.stringify([{ field: "spend", operator: "GREATER_THAN", value: 0 }]),
+      limit: "500",
     });
+    if (proof) insightParams.set("appsecret_proof", proof);
+    return page(`https://graph.facebook.com/v21.0/act_${accountId}/insights?${insightParams}`);
+  };
+  let saved = 0;
+  for (let i = 0; i < windows.length; i += 4) {
+    const raw = (await Promise.all(windows.slice(i, i + 4).map(fetchWindow))).flat();
+    await landingFor(Array.from(new Set(raw.map((r) => String(r.ad_id)).filter(Boolean))));
+    const rows = metaSpendRows(raw, landing).map((r) => ({
+      ...r,
+      spend: r.spend.toFixed(2),
+      purchaseValue: r.purchaseValue.toFixed(2),
+      clientId: connection.clientId,
+      connectionId: connection.id,
+      provider: "meta",
+      accountId,
+      updatedAt: new Date(),
+    }));
+    for (let j = 0; j < rows.length; j += 300) {
+      await db.insert(adSpendDaily).values(rows.slice(j, j + 300)).onConflictDoUpdate({
+        target: [adSpendDaily.connectionId, adSpendDaily.campaignId, adSpendDaily.adId, adSpendDaily.date],
+        set: {
+          campaignName: sql`excluded.campaign_name`,
+          adName: sql`excluded.ad_name`,
+          landingUrl: sql`excluded.landing_url`,
+          spend: sql`excluded.spend`,
+          currency: sql`excluded.currency`,
+          impressions: sql`excluded.impressions`,
+          clicks: sql`excluded.clicks`,
+          leads: sql`excluded.leads`,
+          purchases: sql`excluded.purchases`,
+          purchaseValue: sql`excluded.purchase_value`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+    }
+    saved += rows.length;
   }
-  return { spendRows: rows.length };
+  return { spendRows: saved };
 }
 
 // ---------- HighLevel opt-ins ----------

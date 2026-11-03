@@ -155,7 +155,7 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|calendar|sales|events|ads|projections|training|notifications|neo)$/);
+  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|overview|team|registry(?:\/\d+)?|calendar|sales|events|ads|projections|training|notifications|neo)$/);
   if (!clientPath || Number(clientPath[1]) !== clients.data?.[0]?.id) return <AccessDeniedPage />;
   return <>{children}</>;
 }
