@@ -3,14 +3,46 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import connectPg from "connect-pg-simple";
 import type { User } from "@shared/schema";
-import { storage } from "./storage";
+import { storage, pool } from "./storage";
 import { verifyAgainstNothing, verifyPassword } from "./passwords";
+import { clearAttempts, countAttempt } from "./rate-limit";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-let globalLoginAttempts = { count: 0, resetAt: 0 };
+export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+// Limits per 15 minutes, shared by every server instance (stored in login_attempts).
+const LOGIN_LIMIT_PER_IP = 5;
+const LOGIN_LIMIT_PER_EMAIL = 10;
+const LOGIN_LIMIT_GLOBAL = 300;
+// Password checks are CPU-heavy; cap how many one instance runs at once.
 let activeVerifications = 0;
+
+export const TOO_MANY_ATTEMPTS = "Too many attempts. Try again in 15 minutes.";
+
+// Counts a login attempt against the IP, the email and the global ceiling. True when over a limit.
+export async function loginRateLimited(ip: string, email?: string): Promise<boolean> {
+  const counts = await Promise.all([
+    countAttempt(`ip:${ip}`, LOGIN_WINDOW_MS),
+    countAttempt("global:login", LOGIN_WINDOW_MS),
+    ...(email ? [countAttempt(`email:${email.trim().toLowerCase()}`, LOGIN_WINDOW_MS)] : []),
+  ]);
+  return counts[0] > LOGIN_LIMIT_PER_IP || counts[1] > LOGIN_LIMIT_GLOBAL ||
+    (counts[2] !== undefined && counts[2] > LOGIN_LIMIT_PER_EMAIL);
+}
+
+// Signs a user in on this request with a fresh session id, then answers with where to go next.
+export function startLoginSession(req: any, res: any, user: User, extra: Record<string, unknown> = {}) {
+  req.session.regenerate((sessionError: Error | null) => {
+    if (sessionError) return res.status(500).json({ error: "Could not start session." });
+    req.logIn({
+      claims: { sub: user.id },
+      expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_MS / 1000,
+      ...extra,
+    }, (loginError: Error | null) => {
+      if (loginError) return res.status(500).json({ error: "Could not start session." });
+      return res.json({ redirect: getPostLoginRedirect(user) });
+    });
+  });
+}
 
 async function isIsolatedDemoUser(user: User | undefined): Promise<boolean> {
   if (!user?.id.startsWith("demo-client:") ||
@@ -25,7 +57,7 @@ async function isIsolatedDemoUser(user: User | undefined): Promise<boolean> {
 }
 
 // A client can only sign in while their workspace is active.
-async function hasActiveWorkspace(user: User): Promise<boolean> {
+export async function hasActiveWorkspace(user: User): Promise<boolean> {
   if (user.role !== "agency_client") return true;
   const clientId = user.clientAccess?.[0];
   if (!clientId) return false;
@@ -44,7 +76,7 @@ export const enforceDemoReadOnly: RequestHandler = (req, res, next) => {
 export function getSession() {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
+    pool, // reuse the app pool so each instance holds one set of connections, not two
     createTableIfMissing: false,
     ttl: SESSION_TTL_MS,
     tableName: "sessions",
@@ -108,22 +140,15 @@ export async function setupAuth(app: Express) {
       return res.status(400).json({ error: "Enter an email and password." });
     }
     const ip = req.ip || "unknown";
-    const now = Date.now();
-    const attempts = loginAttempts.get(ip);
-    if (globalLoginAttempts.resetAt <= now) {
-      globalLoginAttempts = { count: 0, resetAt: now + LOGIN_WINDOW_MS };
-      loginAttempts.clear();
+    try {
+      // Counted before checking the password, so parallel guesses cannot slip past the limit.
+      if (await loginRateLimited(ip, email) || activeVerifications >= 2) {
+        return res.status(429).json({ error: TOO_MANY_ATTEMPTS });
+      }
+    } catch (error) {
+      console.error("[auth] rate limit check failed:", error);
+      return res.status(503).json({ error: "Could not sign in right now." });
     }
-    if (attempts && attempts.resetAt > now && attempts.count >= 5 ||
-        globalLoginAttempts.count >= 100 || activeVerifications >= 2) {
-      return res.status(429).json({ error: "Too many attempts. Try again in 15 minutes." });
-    }
-    // Count before asynchronous work, so concurrent requests cannot bypass the limit.
-    globalLoginAttempts.count++;
-    loginAttempts.set(ip, {
-      count: attempts && attempts.resetAt > now ? attempts.count + 1 : 1,
-      resetAt: now + LOGIN_WINDOW_MS,
-    });
     try {
       const user = await storage.getUserByEmail(email);
       const passwordHash = user ? await storage.getPasswordHash(user.id) : undefined;
@@ -155,18 +180,8 @@ export async function setupAuth(app: Express) {
       if (!await hasActiveWorkspace(user)) {
         return res.status(403).json({ error: "This workspace is not active. Contact your administrator." });
       }
-      loginAttempts.delete(ip);
-      req.session.regenerate((sessionError: Error | null) => {
-        if (sessionError) return res.status(500).json({ error: "Could not start session." });
-        req.logIn({
-          claims: { sub: user.id },
-          expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_MS / 1000,
-          ...(isDemo ? { demoLogin: true } : {}),
-        }, (loginError: Error | null) => {
-          if (loginError) return res.status(500).json({ error: "Could not start session." });
-          return res.json({ redirect: getPostLoginRedirect(user) });
-        });
-      });
+      await clearAttempts(`ip:${ip}`, `email:${email.trim().toLowerCase()}`);
+      startLoginSession(req, res, user, isDemo ? { demoLogin: true } : {});
     } catch (error) {
       console.error("[auth] login failed:", error);
       return res.status(500).json({ error: "Could not sign in right now." });

@@ -1,3 +1,4 @@
+import { appUrl } from "./config";
 import { storage } from "./storage";
 
 const META_API_VERSION = "v19.0";
@@ -13,12 +14,7 @@ function getAppCredentials() {
 }
 
 export function getRedirectUri(): string {
-  const domain = process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : process.env.REPL_SLUG
-    ? `https://${process.env.REPL_SLUG}.replit.dev`
-    : "http://localhost:5000";
-  return `${domain}/api/clients/meta-ads/callback`;
+  return `${appUrl()}/api/clients/meta-ads/callback`;
 }
 
 export function getOAuthUrl(clientId: number, nonce: string): string {

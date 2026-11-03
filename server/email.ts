@@ -9,11 +9,19 @@ function getSender(): string {
 }
 
 async function deliverEmail(message: Record<string, unknown>): Promise<void> {
-  const response = await new ReplitConnectors().proxy('resend', '/emails', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...message, from: getSender() }),
-  });
+  const body = JSON.stringify({ ...message, from: getSender() });
+  // RESEND_API_KEY calls Resend directly (works anywhere); otherwise fall back to the Replit connector.
+  const response = process.env.RESEND_API_KEY
+    ? await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+        body,
+      })
+    : await new ReplitConnectors().proxy('resend', '/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
   if (!response.ok) {
     // Do not log or return provider response bodies; they may contain message content.
     throw new Error(`Email provider rejected the message (HTTP ${response.status}).`);
@@ -70,4 +78,47 @@ export async function sendNotificationEmail({
     console.error('Email send error:', err.message);
     return { success: false, error: err.message || 'Failed to send email' };
   }
+}
+
+// A plain message with one button-style link, for invites and password resets.
+async function sendLinkEmail(to: string, subject: string, intro: string, linkLabel: string, link: string, outro: string) {
+  await deliverEmail({
+    to: [to],
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937;">
+        <h2 style="margin-top: 0;">${escapeHtml(subject)}</h2>
+        <p style="line-height: 1.6;">${escapeHtml(intro)}</p>
+        <p style="margin: 28px 0;">
+          <a href="${escapeHtml(link)}" style="background: #3b82f6; color: #ffffff; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: bold;">${escapeHtml(linkLabel)}</a>
+        </p>
+        <p style="line-height: 1.6; color: #6b7280; font-size: 14px;">${escapeHtml(outro)}</p>
+        <p style="color: #9ca3af; font-size: 12px; word-break: break-all;">${escapeHtml(link)}</p>
+      </div>
+    `,
+    text: `${subject}\n\n${intro}\n\n${linkLabel}: ${link}\n\n${outro}`,
+  });
+}
+
+export async function sendInviteEmail(params: { to: string; workspaceName: string; inviterName?: string | null; link: string }) {
+  const who = params.inviterName ? `${params.inviterName} invited you` : "You've been invited";
+  await sendLinkEmail(
+    params.to,
+    `Join ${params.workspaceName} on EventHQ`,
+    `${who} to the ${params.workspaceName} workspace on EventHQ.`,
+    "Accept invite",
+    params.link,
+    "This link works once and expires in 7 days. If you weren't expecting it, you can ignore this email.",
+  );
+}
+
+export async function sendPasswordResetEmail(params: { to: string; link: string }) {
+  await sendLinkEmail(
+    params.to,
+    "Reset your EventHQ password",
+    "Someone asked to reset the password for this EventHQ account.",
+    "Choose a new password",
+    params.link,
+    "This link works once and expires in 1 hour. If you didn't ask for it, ignore this email and your password stays the same.",
+  );
 }

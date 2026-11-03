@@ -1,3 +1,4 @@
+import React, { Component, ErrorInfo, ReactNode, Suspense, lazy } from "react";
 import { Switch, Route, Redirect, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -8,28 +9,36 @@ import { useAuth } from "@/hooks/useAuth";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import ClientLogin from "@/pages/client-login";
-import DashboardPage from "@/pages/dashboard";
-import React, { Component, ErrorInfo, ReactNode } from "react";
+const DashboardPage = lazy(() => import("@/pages/dashboard"));
 
-import ClientsPage from "@/pages/clients";
-import ClientWorkspacePage from "@/pages/client-workspace";
-import AssetsPage from "@/pages/assets";
-import ClientProjectionsPage from "@/pages/projections";
-import ClientDashboard from "@/pages/client-dashboard";
-import EventTrackerPage from "@/pages/event-tracker";
-import TrainingLabPage from "@/pages/training-lab";
-import MarketingCalendarPage from "@/pages/marketing-calendar";
-import NotificationsPage from "@/pages/notifications";
-import SendNotificationsPage from "@/pages/send-notifications";
-import NeoKnowledgePage from "@/pages/neo-knowledge";
-import ActivityLogPage from "@/pages/activity-log";
-import AdCampaignsPage from "@/pages/ad-campaigns";
-import ClientNotificationsPage from "@/pages/client-notifications";
-import ClientOnboardingPage from "@/pages/client-onboarding";
+const ClientsPage = lazy(() => import("@/pages/clients"));
+const ClientWorkspacePage = lazy(() => import("@/pages/client-workspace"));
+const AssetsPage = lazy(() => import("@/pages/assets"));
+const ClientProjectionsPage = lazy(() => import("@/pages/projections"));
+const ClientDashboard = lazy(() => import("@/pages/client-dashboard"));
+const EventTrackerPage = lazy(() => import("@/pages/event-tracker"));
+const TrainingLabPage = lazy(() => import("@/pages/training-lab"));
+const MarketingCalendarPage = lazy(() => import("@/pages/marketing-calendar"));
+const NotificationsPage = lazy(() => import("@/pages/notifications"));
+const SendNotificationsPage = lazy(() => import("@/pages/send-notifications"));
+const NeoKnowledgePage = lazy(() => import("@/pages/neo-knowledge"));
+const ActivityLogPage = lazy(() => import("@/pages/activity-log"));
+const AdCampaignsPage = lazy(() => import("@/pages/ad-campaigns"));
+const ClientNotificationsPage = lazy(() => import("@/pages/client-notifications"));
+const ClientOnboardingPage = lazy(() => import("@/pages/client-onboarding"));
 import AccessDeniedPage from "@/pages/access-denied";
-import LiveSalesFeedPage from "@/pages/live-sales-feed";
-import TalkToNeoPage from "@/pages/talk-to-neo";
-import AdminPage from "@/pages/admin";
+const LiveSalesFeedPage = lazy(() => import("@/pages/live-sales-feed"));
+const TalkToNeoPage = lazy(() => import("@/pages/talk-to-neo"));
+const AdminPage = lazy(() => import("@/pages/admin"));
+const MoneyDashboardPage = lazy(() => import("@/pages/money-dashboard"));
+const IntegrationsPage = lazy(() => import("@/pages/integrations"));
+const EventRegistryPage = lazy(() => import("@/pages/event-registry"));
+const EventDetailPage = lazy(() => import("@/pages/event-detail"));
+const RegistryUnmatchedPage = lazy(() => import("@/pages/registry-unmatched"));
+const ClientTeamPage = lazy(() => import("@/pages/client-team"));
+const ForgotPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ResetPasswordPage })));
+const AcceptInvitePage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.AcceptInvitePage })));
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -146,7 +155,7 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|calendar|sales|events|ads|projections|training|notifications|neo)$/);
+  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|overview|team|registry(?:\/\d+)?|calendar|sales|events|ads|projections|training|notifications|neo)$/);
   if (!clientPath || Number(clientPath[1]) !== clients.data?.[0]?.id) return <AccessDeniedPage />;
   return <>{children}</>;
 }
@@ -181,6 +190,9 @@ function Router() {
         <Route path="/access-denied" component={AccessDeniedPage} />
         <Route path="/admin-login" component={() => <ClientLogin mode="admin" />} />
         <Route path="/client-login" component={() => <ClientLogin />} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/reset-password/:token" component={ResetPasswordPage} />
+        <Route path="/accept-invite/:token" component={AcceptInvitePage} />
         <Route path="/" component={Landing} />
         <Route component={Landing} />
       </Switch>
@@ -193,7 +205,10 @@ function Router() {
       <Route path="/access-denied" component={AccessDeniedPage} />
       <Route path="/admin-login" component={() => <ClientLogin mode="admin" />} />
       <Route path="/client-login" component={() => <ClientLogin />} />
-      
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password/:token" component={ResetPasswordPage} />
+      <Route path="/accept-invite/:token" component={AcceptInvitePage} />
+
       {/* Client-first overview and workspace selection */}
       <Route path="/" component={user?.role === "agency_client" ? ClientStart : DashboardPage} />
       <Route path="/clients" component={() => <InternalOnlyFeature><ClientsPage /></InternalOnlyFeature>} />
@@ -204,7 +219,13 @@ function Router() {
       <Route path="/admin" component={() => <AdminOnlyFeature><AdminPage /></AdminOnlyFeature>} />
 
       {/* Client workspaces */}
-      <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
+      <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><MoneyDashboardPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/overview" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
+      <Route path="/client/:id/integrations" component={() => <InternalOnlyFeature><IntegrationsPage /></InternalOnlyFeature>} />
+      <Route path="/client/:id/registry/unmatched" component={() => <InternalOnlyFeature><RegistryUnmatchedPage /></InternalOnlyFeature>} />
+      <Route path="/client/:id/registry/:eventId" component={() => <ClientPortalFeature><EventDetailPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/registry" component={() => <ClientPortalFeature><EventRegistryPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/team" component={() => <ClientPortalFeature><ClientTeamPage /></ClientPortalFeature>} />
       <Route path="/client/:id/onboarding" component={() => <InternalOnlyFeature><ClientOnboardingPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/workspace" component={() => <InternalOnlyFeature><ClientWorkspacePage /></InternalOnlyFeature>} />
       {/* Event Builder (client/src/pages/event-builder.tsx) is hidden for now; re-add its route here to bring it back. */}
@@ -225,13 +246,25 @@ function Router() {
   );
 }
 
+function PageLoading() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-live="polite">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
+      <span className="sr-only">Loading</span>
+    </div>
+  );
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <Toaster />
-          <Router />
+          {/* Pages load on demand, so a phone downloads only the screen it opens. */}
+          <Suspense fallback={<PageLoading />}>
+            <Router />
+          </Suspense>
         </TooltipProvider>
       </QueryClientProvider>
     </ErrorBoundary>

@@ -1,3 +1,4 @@
+import { appUrl } from "./config";
 import { google } from "googleapis";
 import { storage } from "./storage";
 import { Readable } from "stream";
@@ -15,7 +16,7 @@ export function getOAuth2Client() {
     throw new Error("Google OAuth credentials not configured");
   }
   
-  const redirectUri = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000"}/api/google-drive/callback`;
+  const redirectUri = `${appUrl()}/api/google-drive/callback`;
   
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }

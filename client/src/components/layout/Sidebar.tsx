@@ -22,6 +22,9 @@ import {
   BookOpen,
   History,
   Megaphone,
+  Plug,
+  UsersRound,
+  Trophy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -112,7 +115,9 @@ const workspaceNavigation = [
 ];
 
 const clientNavigation = (clientId: string) => [
-  { name: "Dashboard", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
+  { name: "Revenue & Ad Spend", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
+  { name: "Event Results", href: `/client/${clientId}/registry`, icon: Trophy },
+  { name: "Overview", href: `/client/${clientId}/overview`, icon: ClipboardList },
   { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Client Workspaces", href: "/clients", icon: Users },
   { name: "Onboarding", href: `/client/${clientId}/onboarding`, icon: ClipboardList },
@@ -121,14 +126,18 @@ const clientNavigation = (clientId: string) => [
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
   { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },
   { name: "Ad Campaigns", href: `/client/${clientId}/ads`, icon: Megaphone },
+  { name: "Integrations", href: `/client/${clientId}/integrations`, icon: Plug },
   { name: "Assets", href: `/client/${clientId}/assets`, icon: Image },
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
+  { name: "Team", href: `/client/${clientId}/team`, icon: UsersRound },
   { name: "Client Profile", href: `/client/${clientId}/workspace`, icon: Briefcase },
 ];
 
 const clientPortalNavigation = (clientId: string) => [
-  { name: "Dashboard", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
+  { name: "Revenue & Ad Spend", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
+  { name: "Event Results", href: `/client/${clientId}/registry`, icon: Trophy },
+  { name: "Overview", href: `/client/${clientId}/overview`, icon: ClipboardList },
   { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
@@ -137,6 +146,7 @@ const clientPortalNavigation = (clientId: string) => [
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
+  { name: "Team", href: `/client/${clientId}/team`, icon: UsersRound },
 ];
 
 interface SidebarProps {

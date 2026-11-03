@@ -110,3 +110,59 @@ test("Whop webhook records sales once per payment, needs the workspace token, an
     await db.delete(agencies).where(eq(agencies.id, agency.id));
   }
 });
+
+test("signed Whop webhooks need a valid signature and the registry places the sale on its event", async () => {
+  process.env.SESSION_SECRET ||= "test-session-secret";
+  const { saveConnection } = await import("./integrations/connections");
+  const { signStandardWebhook } = await import("./webhook-signatures");
+  const { eventPerformance, integrationConnections } = await import("@shared/schema");
+  const marker = randomUUID();
+  const app = express();
+  app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
+  registerWhopWebhook(app);
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No test port");
+
+  const [agency] = await db.insert(agencies).values({ name: `whop-signed-${marker}` }).returning();
+  const [client] = await db.insert(clients).values({ name: `whop-signed-${marker}`, agencyId: agency.id }).returning();
+  try {
+    const secret = `whsec_${Buffer.from(`secret-${marker}`).toString("base64")}`;
+    const connection = await saveConnection({ clientId: client.id, provider: "whop", externalAccountId: `biz_${marker}`, credentials: { apiKey: "test" }, webhookSecret: secret });
+    const today = new Date().toISOString().slice(0, 10);
+    const [event] = await db.insert(eventPerformance).values({
+      clientId: client.id, title: "Masterclass", eventType: "webinar", startDate: new Date(), funnelRole: "main",
+      cartOpen: "2020-01-01", cartClose: today, postCartEnd: "2099-01-01", products: { vip: ["Masterclass VIP"] },
+    }).returning();
+
+    const send = async (body: unknown, sign: boolean | string, url = `/api/webhooks/whop/${connection.id}`) => {
+      const raw = JSON.stringify(body);
+      const ts = Math.floor(Date.now() / 1000);
+      const headers: Record<string, string> = { "content-type": "application/json", "webhook-id": "msg_1", "webhook-timestamp": String(ts) };
+      if (sign) headers["webhook-signature"] = signStandardWebhook(raw, typeof sign === "string" ? sign : secret, "msg_1", ts);
+      return (await fetch(`http://127.0.0.1:${address.port}${url}`, { method: "POST", headers, body: raw })).status;
+    };
+    const sale = { ...payment(`pay_${marker}`, 250), data: { ...payment(`pay_${marker}`, 250).data, product: { id: "prod_masterclass", title: "Masterclass VIP" } } };
+
+    assert.equal(await send(sale, false), 401, "unsigned");
+    assert.equal(await send(sale, "whsec_" + Buffer.from("wrong").toString("base64")), 401, "wrong secret");
+    // Once a signing secret exists, the legacy token URL needs a signature too.
+    assert.equal(await send(sale, false, `/api/webhooks/whop?token=${client.webhookToken}`), 401);
+    assert.equal(await send(sale, true), 200);
+
+    const [row] = await db.select().from(sales).where(eq(sales.clientId, client.id));
+    assert.equal(row.productId, "prod_masterclass");
+    assert.equal(row.eventPerformanceId, event.id);
+    assert.equal(row.connectionId, connection.id);
+    const [stored] = await db.select().from(integrationConnections).where(eq(integrationConnections.id, connection.id));
+    assert.ok(stored.lastWebhookAt);
+    assert.ok(!stored.webhookSecretCiphertext!.includes(secret), "secret stored encrypted");
+  } finally {
+    server.close();
+    await db.delete(sales).where(eq(sales.clientId, client.id));
+    await db.delete(salesSources).where(eq(salesSources.clientId, client.id));
+    await db.delete(clients).where(eq(clients.id, client.id));
+    await db.delete(agencies).where(eq(agencies.id, agency.id));
+  }
+});

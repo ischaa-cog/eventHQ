@@ -73,11 +73,19 @@ import { hashPassword } from "./passwords";
 
 const { Pool } = pg;
 
-const pool = new Pool({
+// One pool per process, shared by Drizzle and the session store.
+// Each Vercel function instance gets its own pool; keep them small so many instances fit the Supabase pooler.
+export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Each Vercel function instance gets its own pool; keep them small so many instances fit the Supabase pooler.
-  ...(process.env.VERCEL ? { max: 3 } : {}),
+  max: process.env.VERCEL ? 3 : 10,
+  // Fail fast instead of hanging until the 60s function limit when the database is unreachable or the pool is full.
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 10_000,
+  // Stop runaway queries before Vercel kills the function.
+  statement_timeout: 30_000,
 });
+// An idle client erroring (e.g. the pooler dropping it) must not crash the process.
+pool.on("error", (err) => console.error("[db] idle client error:", err.message));
 
 export const db = drizzle(pool);
 
@@ -88,6 +96,7 @@ export type NewLoginUser = {
   role: string;
   agencyId?: number | null;
   clientAccess?: number[] | null;
+  clientRole?: "owner" | "member" | null;
 };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
