@@ -23,6 +23,7 @@ import {
   History,
   Megaphone,
   Plug,
+  UsersRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -127,6 +128,7 @@ const clientNavigation = (clientId: string) => [
   { name: "Assets", href: `/client/${clientId}/assets`, icon: Image },
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
+  { name: "Team", href: `/client/${clientId}/team`, icon: UsersRound },
   { name: "Client Profile", href: `/client/${clientId}/workspace`, icon: Briefcase },
 ];
 
@@ -141,6 +143,7 @@ const clientPortalNavigation = (clientId: string) => [
   { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
   { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
   { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
+  { name: "Team", href: `/client/${clientId}/team`, icon: UsersRound },
 ];
 
 interface SidebarProps {

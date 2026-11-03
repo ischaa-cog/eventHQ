@@ -111,11 +111,11 @@ test("Whop webhook records sales once per payment, needs the workspace token, an
   }
 });
 
-test("signed Whop webhooks need a valid signature and attribute sales to the event selling that product", async () => {
+test("signed Whop webhooks need a valid signature and the registry places the sale on its event", async () => {
   process.env.SESSION_SECRET ||= "test-session-secret";
   const { saveConnection } = await import("./integrations/connections");
   const { signStandardWebhook } = await import("./webhook-signatures");
-  const { eventAttributionRules, eventPerformance, integrationConnections } = await import("@shared/schema");
+  const { eventPerformance, integrationConnections } = await import("@shared/schema");
   const marker = randomUUID();
   const app = express();
   app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
@@ -130,8 +130,11 @@ test("signed Whop webhooks need a valid signature and attribute sales to the eve
   try {
     const secret = `whsec_${Buffer.from(`secret-${marker}`).toString("base64")}`;
     const connection = await saveConnection({ clientId: client.id, provider: "whop", externalAccountId: `biz_${marker}`, credentials: { apiKey: "test" }, webhookSecret: secret });
-    const [event] = await db.insert(eventPerformance).values({ clientId: client.id, title: "Masterclass", eventType: "webinar", startDate: new Date() }).returning();
-    await db.insert(eventAttributionRules).values({ clientId: client.id, eventPerformanceId: event.id, kind: "product", provider: "whop", matchValue: "prod_masterclass" });
+    const today = new Date().toISOString().slice(0, 10);
+    const [event] = await db.insert(eventPerformance).values({
+      clientId: client.id, title: "Masterclass", eventType: "webinar", startDate: new Date(), funnelRole: "main",
+      cartOpen: "2020-01-01", cartClose: today, postCartEnd: "2099-01-01", products: { vip: ["Masterclass VIP"] },
+    }).returning();
 
     const send = async (body: unknown, sign: boolean | string, url = `/api/webhooks/whop/${connection.id}`) => {
       const raw = JSON.stringify(body);

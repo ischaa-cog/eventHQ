@@ -57,29 +57,36 @@ test("revenue summary and integrations stay inside each client's workspace", asy
     const own = await call(clientA, path(a.id));
     assert.equal(own.status, 200);
     assert.equal(own.body.totals.revenue, 200, "net of the refund");
-    assert.equal(own.body.events[0].revenueSource, "manual");
+    assert.equal(own.body.events[0].revenueSource, "manual", "not in the registry yet");
 
     assert.equal((await call(clientA, path(b.id))).status, 403, "client cannot read another workspace");
     assert.equal((await call(staffB, path(a.id))).status, 403, "staff cannot read an unassigned workspace");
     assert.equal((await call(null, path(a.id))).status, 401);
     assert.equal((await call(clientA, `/api/clients/${a.id}/integrations`)).status, 403, "clients cannot see connections");
-    assert.equal((await call(clientA, `/api/clients/${a.id}/attribution`)).status, 403, "clients cannot change event links");
-    assert.equal((await call(staffB, `/api/clients/${a.id}/attribution`, "PUT", {
-      eventPerformanceId: event.id, kind: "product", provider: "whop", matchValue: "prod_1",
-    })).status, 403);
+    assert.equal((await call(clientA, `/api/clients/${a.id}/registry/unmatched`)).status, 403, "clients cannot see the unmatched list");
+    assert.equal((await call(clientA, `/api/clients/${a.id}/registry/events`, "POST", {})).status, 403, "clients cannot edit the registry");
+    assert.equal((await call(staffB, `/api/clients/${a.id}/registry`)).status, 403, "staff cannot read an unassigned registry");
 
-    // Linking the product moves its sales onto the event.
-    const linked = await call(owner, `/api/clients/${a.id}/attribution`, "PUT", {
-      eventPerformanceId: event.id, kind: "product", provider: "whop", matchValue: "prod_1", label: "VIP",
+    // Putting the event in the registry with its product moves its sales onto it.
+    const created = await call(owner, `/api/clients/${a.id}/registry/events`, "POST", {
+      title: "Masterclass", funnelRole: "main", eventStart: iso, cartOpen: iso, cartClose: iso, postCartEnd: iso,
+      products: { vip: "VIP" }, pageLinks: "https://www.Example.com/mc/?utm=1",
     });
-    assert.equal(linked.status, 200);
-    assert.equal(linked.body.retagged.sales, 2);
+    assert.equal(created.status, 201);
+    assert.match(created.body.registryId, /^MON-\d{4}-MAIN$/);
+    await db.update(sales).set({ productName: "VIP" }).where(eq(sales.clientId, a.id));
+    const fixed = await call(owner, `/api/clients/${a.id}/registry/rematch`, "POST");
+    assert.equal(fixed.status, 200);
     const after = await call(owner, path(a.id));
-    assert.equal(after.body.events[0].revenueSource, "synced");
-    assert.equal(after.body.events[0].revenue, 200);
-    // An event in another workspace cannot be linked.
-    assert.equal((await call(owner, `/api/clients/${b.id}/attribution`, "PUT", {
-      eventPerformanceId: event.id, kind: "product", provider: "whop", matchValue: "prod_x",
+    const ev = after.body.events.find((e: any) => e.id === created.body.id);
+    assert.equal(ev.revenueSource, "registry");
+    assert.equal(ev.revenue, 200, "payment minus its refund");
+    const reg = await call(clientA, `/api/clients/${a.id}/registry`);
+    assert.equal(reg.status, 200, "clients can read their registry");
+    assert.deepEqual(reg.body.events.find((e: any) => e.id === created.body.id).pageLinks, ["example.com/mc"]);
+    // An event in another workspace cannot be the target of a fix.
+    assert.equal((await call(owner, `/api/clients/${b.id}/registry/assign`, "POST", {
+      eventId: created.body.id, kind: "product", value: "X", tier: "vip",
     })).status, 404);
 
     // Connections never echo secrets back.

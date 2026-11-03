@@ -96,6 +96,7 @@ export type NewLoginUser = {
   role: string;
   agencyId?: number | null;
   clientAccess?: number[] | null;
+  clientRole?: "owner" | "member" | null;
 };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

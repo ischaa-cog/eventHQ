@@ -54,7 +54,8 @@ test("Meta rows take the largest of a conversion's aliases instead of adding the
     action_values: [{ action_type: "purchase", value: "997" }, { action_type: "offsite_conversion.fb_pixel_purchase", value: "997" }],
   }]);
   assert.deepEqual(row, {
-    campaignId: "123", campaignName: "Masterclass", date: "2026-11-01", spend: 250.5, currency: "USD",
+    campaignId: "123", campaignName: "Masterclass", adId: "", adName: null, landingUrl: null,
+    date: "2026-11-01", spend: 250.5, currency: "USD",
     impressions: 1000, clicks: 40, leads: 12, purchases: 0, purchaseValue: 997,
   });
 });
@@ -68,4 +69,21 @@ test("Whop API payments and refunds map like webhook events", () => {
   assert.deepEqual(records.map((r) => [r.dedupeKey, r.amount, r.productId]), [["whop:pay_1", 297, "prod_1"], ["whop-refund:rf_1", 100, "prod_1"]]);
   assert.deepEqual(records[0].productIds, ["prod_1", "plan_1"]);
   assert.deepEqual(remove, ["whop-refund:rf_2"]);
+});
+
+test("an ad's landing page comes from its creative, normalized; lead-form ads have none", async () => {
+  const { adLandingUrl } = await import("./sync");
+  assert.equal(adLandingUrl({ creative: { object_story_spec: { link_data: { link: "https://www.AIsummit.com/Register/?utm_source=fb" } } } }), "aisummit.com/register");
+  assert.equal(adLandingUrl({ creative: { object_story_spec: { video_data: { call_to_action: { value: { link: "https://x.com/vsl" } } } } } }), "x.com/vsl");
+  assert.equal(adLandingUrl({ creative: { asset_feed_spec: { link_urls: [{ website_url: "https://y.com/a" }] } } }), "y.com/a");
+  assert.equal(adLandingUrl({ creative: { object_story_spec: { video_data: { call_to_action: { value: { lead_gen_form_id: "123" } } } } } }), null);
+});
+
+test("HighLevel submissions keep the page they came from", async () => {
+  const { highlevelOptIns } = await import("./sync");
+  const [row] = highlevelOptIns([{ id: "s1", createdAt: "2026-11-02T10:00:00.000Z", email: "A@B.com", formId: "f1",
+    others: { eventData: { page: { url: "https://AIinfosession.com/optin?fbclid=1", title: "Opt in" } } } }]);
+  assert.equal(row.pageUrl, "aiinfosession.com/optin");
+  assert.equal(row.email, "a@b.com");
+  assert.equal(row.externalId, "s1");
 });

@@ -26,6 +26,9 @@ export const users = pgTable("users", {
   role: varchar("role").default("agency_employee"), // default is fail-closed for uninvited users
   agencyId: integer("agency_id"),
   clientAccess: integer("client_access").array(), // assigned client for client accounts
+  // Inside a client workspace: "owner" manages the team, "member" only views. Null for staff;
+  // a client login with no value counts as an owner (accounts made before team roles existed).
+  clientRole: varchar("client_role"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -234,7 +237,7 @@ export const sales = pgTable("sales", {
   dedupeKey: text("dedupe_key"),
   metadata: jsonb("metadata"),
   // Set by provider syncs: which connection the sale came from and the provider's product/plan/price id,
-  // which is what links a sale to an event (see eventAttributionRules).
+  // which the registry matcher uses together with the product name.
   connectionId: integer("connection_id"),
   productId: text("product_id"),
   // A refund's original payment (its dedupe key), so the refund lands on the same event.
@@ -299,6 +302,7 @@ export const invites = pgTable("invites", {
   expiresAt: timestamp("expires_at"),
   usedAt: timestamp("used_at"),
   usedById: varchar("used_by_id").references(() => users.id),
+  clientRole: text("client_role"), // "owner" | "member" for client team invites
 });
 
 export const insertInviteSchema = createInsertSchema(invites).omit({ id: true, createdAt: true });
@@ -810,3 +814,20 @@ export const productContractValues = pgTable("product_contract_values", {
   fullValue: numeric("full_value", { precision: 14, scale: 2 }).notNull(),
 }, (table) => [uniqueIndex("product_contract_client_name_idx").on(table.clientId, table.productName)]);
 export type ProductContractValue = typeof productContractValues.$inferSelect;
+
+// PASSWORD RESET: one-time links sent by email. Only a SHA-256 of the token is stored.
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// LOGIN RATE LIMITS: shared by every server instance, keyed like "ip:1.2.3.4" or "email:a@b.com".
+export const loginAttempts = pgTable("login_attempts", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});

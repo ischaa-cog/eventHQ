@@ -103,6 +103,7 @@ export default function ClientLogin({ mode = "client" }: { mode?: "client" | "ad
                 </div>
                 {error && <p role="alert" className="client-demo-error">{error}</p>}
                 <button type="submit" disabled={submitting}>{submitting ? "Signing in…" : "Sign in"}</button>
+                <a href="/forgot-password" className="client-login-help" data-testid="link-forgot-password">Forgot password?</a>
               </form>
             </div>
           )}

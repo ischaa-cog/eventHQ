@@ -1,4 +1,4 @@
--- Per-client integrations, daily ad spend per ad, opt-ins, and the Event Registry.
+-- Per-client integrations, ad spend per ad, opt-ins, the Event Registry, and client team logins.
 CREATE TABLE IF NOT EXISTS "ad_spend_daily" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"client_id" integer NOT NULL,
@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS "integration_connections" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "login_attempts" (
+	"key" text PRIMARY KEY NOT NULL,
+	"count" integer DEFAULT 0 NOT NULL,
+	"reset_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "opt_ins" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"client_id" integer NOT NULL,
@@ -69,6 +75,16 @@ CREATE TABLE IF NOT EXISTS "opt_ins" (
 	"event_performance_id" integer,
 	"match_status" text,
 	"match_note" text
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "password_reset_tokens" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"user_id" varchar NOT NULL,
+	"token_hash" text NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"used_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "password_reset_tokens_token_hash_unique" UNIQUE("token_hash")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "product_contract_values" (
@@ -102,6 +118,8 @@ ALTER TABLE "event_performance" ADD COLUMN IF NOT EXISTS "products" jsonb;
 --> statement-breakpoint
 ALTER TABLE "event_performance" ADD COLUMN IF NOT EXISTS "ad_campaign_ids" text[];
 --> statement-breakpoint
+ALTER TABLE "invites" ADD COLUMN IF NOT EXISTS "client_role" text;
+--> statement-breakpoint
 ALTER TABLE "sales" ADD COLUMN IF NOT EXISTS "connection_id" integer;
 --> statement-breakpoint
 ALTER TABLE "sales" ADD COLUMN IF NOT EXISTS "product_id" text;
@@ -115,6 +133,8 @@ ALTER TABLE "sales" ADD COLUMN IF NOT EXISTS "match_tier" text;
 ALTER TABLE "sales" ADD COLUMN IF NOT EXISTS "match_offer_id" integer;
 --> statement-breakpoint
 ALTER TABLE "sales" ADD COLUMN IF NOT EXISTS "match_note" text;
+--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "client_role" varchar;
 --> statement-breakpoint
 DO $$ BEGIN
   ALTER TABLE "ad_spend_daily" ADD CONSTRAINT "ad_spend_daily_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE cascade ON UPDATE no action;
@@ -158,6 +178,11 @@ END $$;
 --> statement-breakpoint
 DO $$ BEGIN
   ALTER TABLE "opt_ins" ADD CONSTRAINT "opt_ins_event_performance_id_event_performance_id_fk" FOREIGN KEY ("event_performance_id") REFERENCES "public"."event_performance"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+  ALTER TABLE "password_reset_tokens" ADD CONSTRAINT "password_reset_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 --> statement-breakpoint
