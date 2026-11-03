@@ -32,6 +32,9 @@ const TalkToNeoPage = lazy(() => import("@/pages/talk-to-neo"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const MoneyDashboardPage = lazy(() => import("@/pages/money-dashboard"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations"));
+const EventRegistryPage = lazy(() => import("@/pages/event-registry"));
+const EventDetailPage = lazy(() => import("@/pages/event-detail"));
+const RegistryUnmatchedPage = lazy(() => import("@/pages/registry-unmatched"));
 const ClientTeamPage = lazy(() => import("@/pages/client-team"));
 const ForgotPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ResetPasswordPage })));
@@ -219,6 +222,9 @@ function Router() {
       <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><MoneyDashboardPage /></ClientPortalFeature>} />
       <Route path="/client/:id/overview" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
       <Route path="/client/:id/integrations" component={() => <InternalOnlyFeature><IntegrationsPage /></InternalOnlyFeature>} />
+      <Route path="/client/:id/registry/unmatched" component={() => <InternalOnlyFeature><RegistryUnmatchedPage /></InternalOnlyFeature>} />
+      <Route path="/client/:id/registry/:eventId" component={() => <ClientPortalFeature><EventDetailPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/registry" component={() => <ClientPortalFeature><EventRegistryPage /></ClientPortalFeature>} />
       <Route path="/client/:id/team" component={() => <ClientPortalFeature><ClientTeamPage /></ClientPortalFeature>} />
       <Route path="/client/:id/onboarding" component={() => <InternalOnlyFeature><ClientOnboardingPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/workspace" component={() => <InternalOnlyFeature><ClientWorkspacePage /></InternalOnlyFeature>} />

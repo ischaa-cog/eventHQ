@@ -2,7 +2,7 @@
 // Secrets typed here go to the server once and are stored encrypted; the page only ever shows a
 // masked hint ("rk_live_…a1b2") afterwards.
 import { useMemo, useState } from "react";
-import { Link, useParams, useSearch } from "wouter";
+import { Link, useParams } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CheckCircle2, Copy, Loader2, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
@@ -12,8 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -23,12 +21,6 @@ type Connection = {
   lastSyncAt: string | null; lastWebhookAt: string | null; lastError: string | null; hasWebhookSecret: boolean;
   credentialHints: Record<string, string>; webhookUrl: string | null;
 };
-type Attribution = {
-  rules: Array<{ id: number; eventPerformanceId: number; kind: "product" | "campaign"; provider: string; matchValue: string; label: string | null }>;
-  products: Array<{ provider: string; productId: string; productName: string | null; revenue: number; orders: number; lastSale: string }>;
-  campaigns: Array<{ provider: string; campaignId: string; campaignName: string | null; spend: number; firstDay: string; lastDay: string }>;
-};
-type EventPerf = { id: number; title: string; eventType: string; startDate: string };
 
 type Field = { key: string; label: string; placeholder?: string; secret?: boolean; required?: boolean; help?: string };
 const PROVIDERS: Record<string, { name: string; blurb: string; account?: Field; fields: Field[]; webhookSecret?: Field }> = {
@@ -58,6 +50,12 @@ const PROVIDERS: Record<string, { name: string; blurb: string; account?: Field; 
     blurb: "Transactions and refunds.",
     fields: [{ key: "apiKey", label: "API key", secret: true, required: true }],
   },
+  highlevel: {
+    name: "HighLevel opt-ins",
+    blurb: "Form submissions from funnel pages, with the page each came from. Sales still arrive by the workspace webhook.",
+    account: { key: "externalAccountId", label: "Location ID", placeholder: "Fk0BkQ526NRxmsgT6LhH", required: true, help: "Settings → Business Profile in the sub-account." },
+    fields: [{ key: "apiKey", label: "Private integration token", secret: true, required: true, help: "Settings → Private Integrations. Needs forms read access." }],
+  },
 };
 
 const ago = (v: string | null) => (v ? format(new Date(v), "MMM d, h:mm a") : "never");
@@ -70,10 +68,8 @@ const errorText = (e: unknown) => {
 
 export default function IntegrationsPage() {
   const { id: clientId } = useParams<{ id: string }>();
-  const search = new URLSearchParams(useSearch());
   const { user } = useAuth();
   const isAdmin = user?.role === "owner" || user?.role === "agency_admin";
-  const [tab, setTab] = useState(search.get("tab") === "links" ? "links" : "connections");
 
   return (
     <AppLayout mode="client" title="Integrations" pageContext="Integrations">
@@ -82,18 +78,13 @@ export default function IntegrationsPage() {
           <h1 className="font-heading text-2xl font-bold tracking-tight md:text-3xl">Integrations</h1>
           <p className="text-sm text-muted-foreground">Where this client's revenue and ad spend come from.</p>
         </header>
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-2 md:w-auto md:inline-grid">
-            <TabsTrigger value="connections" className="h-10">Connections</TabsTrigger>
-            <TabsTrigger value="links" className="h-10">Link to events</TabsTrigger>
-          </TabsList>
-          <TabsContent value="connections" className="mt-4">
-            {isAdmin ? <Connections clientId={clientId!} /> : <p className="text-sm text-muted-foreground">Only admins can manage connections.</p>}
-          </TabsContent>
-          <TabsContent value="links" className="mt-4">
-            <EventLinks clientId={clientId!} focusEventId={Number(search.get("event")) || null} />
-          </TabsContent>
-        </Tabs>
+        {isAdmin ? <Connections clientId={clientId!} /> : <p className="text-sm text-muted-foreground">Only admins can manage connections.</p>}
+        <Card className="rounded-xl">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">Which ads, opt-ins and sales belong to which event is set in Event Results, by dates, page links and product names.</p>
+            <Button asChild variant="outline" className="h-11 shrink-0"><Link href={`/client/${clientId}/registry`}>Open Event Results</Link></Button>
+          </CardContent>
+        </Card>
       </div>
     </AppLayout>
   );
@@ -147,11 +138,13 @@ function ConnectionRow({ connection: c, clientId }: { connection: Connection; cl
   const invalidate = () => queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/integrations`] });
   const sync = useMutation({
     mutationFn: async () => (await apiRequest("POST", `/api/clients/${clientId}/integrations/${c.id}/sync`)).json(),
-    onSuccess: (r: { sales: number; refunds: number; spendRows: number; complete: boolean }) => {
+    onSuccess: (r: { sales: number; refunds: number; spendRows: number; optIns: number; complete: boolean }) => {
       toast({
         title: r.complete ? "Synced" : "Partly synced",
         description: c.provider === "meta"
-          ? `${r.spendRows} campaign-days updated.`
+          ? `${r.spendRows} ad-days updated.`
+          : c.provider === "highlevel"
+          ? `${r.optIns} opt-ins updated.${r.complete ? "" : " Sync again to finish."}`
           : `${r.sales} sales and ${r.refunds} refunds updated.${r.complete ? "" : " Sync again to finish."}`,
       });
     },
@@ -271,110 +264,5 @@ function ConnectForm({ provider, clientId, onDone }: { provider: string; clientI
         <Button type="button" variant="ghost" className="h-11" onClick={onDone}>Cancel</Button>
       </div>
     </form>
-  );
-}
-
-function EventLinks({ clientId, focusEventId }: { clientId: string; focusEventId: number | null }) {
-  const key = [`/api/clients/${clientId}/attribution`];
-  const { data, isLoading } = useQuery<Attribution>({ queryKey: key });
-  const { data: events = [] } = useQuery<EventPerf[]>({ queryKey: [`/api/clients/${clientId}/event-performance`] });
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [filter, setFilter] = useState("");
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: key });
-    queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith(`/api/clients/${clientId}/money-summary`) });
-  };
-  const link = useMutation({
-    mutationFn: async (body: { eventPerformanceId: number; kind: "product" | "campaign"; provider: string; matchValue: string; label: string | null }) =>
-      (await apiRequest("PUT", `/api/clients/${clientId}/attribution`, body)).json(),
-    onSuccess: invalidate,
-    onError: (e) => toast({ title: "Could not link", description: errorText(e), variant: "destructive" }),
-  });
-  const unlink = useMutation({
-    mutationFn: async (id: number) => (await apiRequest("DELETE", `/api/clients/${clientId}/attribution/${id}`)).json(),
-    onSuccess: invalidate,
-  });
-
-  const ruleFor = useMemo(() => {
-    const m = new Map<string, Attribution["rules"][number]>();
-    for (const r of data?.rules ?? []) m.set(`${r.kind}|${r.provider}|${r.matchValue}`, r);
-    return m;
-  }, [data]);
-  const sortedEvents = [...events].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
-  const matches = (text: string | null) => !filter || (text ?? "").toLowerCase().includes(filter.toLowerCase());
-
-  if (isLoading) return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />;
-  if (!events.length) {
-    return (
-      <Card className="rounded-xl"><CardContent className="p-4 text-sm text-muted-foreground">
-        Add events in <Link href={`/client/${clientId}/events`} className="underline">Event Tracker</Link> first, then link what each one sells.
-      </CardContent></Card>
-    );
-  }
-
-  const picker = (kind: "product" | "campaign", provider: string, matchValue: string, label: string | null) => {
-    const rule = ruleFor.get(`${kind}|${provider}|${matchValue}`);
-    return (
-      <Select
-        value={rule ? String(rule.eventPerformanceId) : "none"}
-        onValueChange={(v) => {
-          if (v === "none") { if (rule) unlink.mutate(rule.id); return; }
-          link.mutate({ eventPerformanceId: Number(v), kind, provider, matchValue, label });
-        }}
-      >
-        <SelectTrigger className="h-11 w-full sm:w-64" aria-label={`Event for ${label ?? matchValue}`}>
-          <SelectValue placeholder="Not linked" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none">Not linked</SelectItem>
-          {sortedEvents.map((e) => (
-            <SelectItem key={e.id} value={String(e.id)}>{e.title} · {format(new Date(e.startDate), "MMM d, yyyy")}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-  };
-
-  const focus = focusEventId ? events.find((e) => e.id === focusEventId) : undefined;
-  return (
-    <div className="space-y-5">
-      <p className="text-sm text-muted-foreground">
-        {focus ? <>Choose what <span className="font-medium text-foreground">{focus.title}</span> sold and which ads promoted it. </> : null}
-        Each sale of a linked product, and each dollar spent on a linked campaign, counts toward that event. Past sales move over when you link.
-      </p>
-      <Input className="h-11" placeholder="Search products and campaigns" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <Card className="rounded-xl">
-        <CardHeader className="pb-2"><CardTitle className="text-base">Products</CardTitle><CardDescription>From synced sales, highest revenue first.</CardDescription></CardHeader>
-        <CardContent className="divide-y divide-border">
-          {(data?.products ?? []).filter((p) => matches(p.productName) || matches(p.productId)).slice(0, 200).map((p) => (
-            <div key={`${p.provider}|${p.productId}`} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{p.productName ?? p.productId}</p>
-                <p className="text-xs text-muted-foreground">{p.provider} · {usd(p.revenue)} · {p.orders} orders · last {format(new Date(p.lastSale), "MMM d")}</p>
-              </div>
-              {picker("product", p.provider, p.productId, p.productName)}
-            </div>
-          ))}
-          {!data?.products.length && <p className="py-3 text-sm text-muted-foreground">No synced products yet. Connect a sales account first.</p>}
-        </CardContent>
-      </Card>
-      <Card className="rounded-xl">
-        <CardHeader className="pb-2"><CardTitle className="text-base">Ad campaigns</CardTitle><CardDescription>From synced ad accounts, highest spend first.</CardDescription></CardHeader>
-        <CardContent className="divide-y divide-border">
-          {(data?.campaigns ?? []).filter((c) => matches(c.campaignName) || matches(c.campaignId)).slice(0, 200).map((c) => (
-            <div key={`${c.provider}|${c.campaignId}`} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{c.campaignName ?? c.campaignId}</p>
-                <p className="text-xs text-muted-foreground">{usd(c.spend)} · {format(new Date(c.firstDay), "MMM d")} – {format(new Date(c.lastDay), "MMM d")}</p>
-              </div>
-              {picker("campaign", c.provider, c.campaignId, c.campaignName)}
-            </div>
-          ))}
-          {!data?.campaigns.length && <p className="py-3 text-sm text-muted-foreground">No synced campaigns yet. Connect Meta Ads first.</p>}
-        </CardContent>
-      </Card>
-    </div>
   );
 }

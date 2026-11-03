@@ -24,6 +24,7 @@ import {
   Megaphone,
   Plug,
   UsersRound,
+  Trophy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -115,6 +116,7 @@ const workspaceNavigation = [
 
 const clientNavigation = (clientId: string) => [
   { name: "Revenue & Ad Spend", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
+  { name: "Event Results", href: `/client/${clientId}/registry`, icon: Trophy },
   { name: "Overview", href: `/client/${clientId}/overview`, icon: ClipboardList },
   { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Client Workspaces", href: "/clients", icon: Users },
@@ -134,6 +136,7 @@ const clientNavigation = (clientId: string) => [
 
 const clientPortalNavigation = (clientId: string) => [
   { name: "Revenue & Ad Spend", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
+  { name: "Event Results", href: `/client/${clientId}/registry`, icon: Trophy },
   { name: "Overview", href: `/client/${clientId}/overview`, icon: ClipboardList },
   { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },

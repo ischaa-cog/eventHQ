@@ -24,9 +24,11 @@ type Totals = {
   roas: number | null; leads: number; clicks: number; impressions: number; costPerLead: number | null;
 };
 type EventRow = {
-  id: number; title: string; type: string; startDate: string; endDate: string | null;
-  revenue: number; adSpend: number; profit: number; roas: number | null; orders: number | null;
-  revenueSource: "synced" | "manual"; spendSource: "synced" | "manual"; linkedProducts: number; linkedCampaigns: number;
+  id: number; registryId: string | null; title: string; type: string; role: "main" | "mini" | null;
+  startDate: string; endDate: string | null;
+  revenue: number; adSpend: number; profit: number; roas: number | null; orders: number | null; buyers: number | null;
+  optIns: number | null; costPerOptIn: number | null; includesMinis: boolean; miniCount: number;
+  revenueSource: "registry" | "manual"; spendSource: "registry" | "manual";
   registrants: number; attendees: number; peopleAtPitch: number; showUpRate: number | null;
   costPerRegistrant: number | null; leads: number | null;
 };
@@ -375,10 +377,12 @@ function EventCard({ event: e, isStaff, clientId }: { event: EventRow; isStaff: 
   const dates = e.endDate && e.endDate.slice(0, 10) !== e.startDate.slice(0, 10)
     ? `${format(new Date(e.startDate), "MMM d")} – ${format(new Date(e.endDate), "MMM d, yyyy")}`
     : format(new Date(e.startDate), "MMM d, yyyy");
-  const manual = e.revenueSource === "manual" || e.spendSource === "manual";
+  const manual = e.revenueSource === "manual";
   const detail: Array<[string, string]> = [
     ["Profit", usd(e.profit)],
     ["Orders", e.orders === null ? "—" : e.orders.toLocaleString()],
+    ["Opt-ins", e.optIns === null ? "—" : e.optIns.toLocaleString()],
+    ["Cost per opt-in", e.costPerOptIn === null ? "—" : usdCents(e.costPerOptIn)],
     ["Registrants", e.registrants.toLocaleString()],
     ["Attended", e.attendees.toLocaleString()],
     ["Show-up rate", e.showUpRate === null ? "—" : `${e.showUpRate.toFixed(0)}%`],
@@ -394,7 +398,9 @@ function EventCard({ event: e, isStaff, clientId }: { event: EventRow; isStaff: 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate font-medium">{e.title}</p>
-                <p className="text-xs text-muted-foreground">{EVENT_TYPE[e.type] ?? e.type} · {dates}</p>
+                <p className="text-xs text-muted-foreground">
+                  {e.registryId ? `${e.registryId} · ` : ""}{EVENT_TYPE[e.type] ?? e.type} · {dates}
+                </p>
               </div>
               <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
             </div>
@@ -416,13 +422,18 @@ function EventCard({ event: e, isStaff, clientId }: { event: EventRow; isStaff: 
               ))}
             </dl>
             <div className="flex flex-wrap gap-2 text-xs">
-              <Badge variant="outline">Revenue: {e.revenueSource === "synced" ? `${e.linkedProducts} linked product${e.linkedProducts === 1 ? "" : "s"}` : "typed in Event Tracker"}</Badge>
-              <Badge variant="outline">Ad spend: {e.spendSource === "synced" ? `${e.linkedCampaigns} linked campaign${e.linkedCampaigns === 1 ? "" : "s"}` : "typed in Event Tracker"}</Badge>
+              {manual
+                ? <Badge variant="outline">Numbers typed in Event Tracker</Badge>
+                : <Badge variant="outline">Matched by the event registry{e.includesMinis ? ` · includes ${e.miniCount} Mini${e.miniCount === 1 ? "" : "s"}` : ""}</Badge>}
             </div>
-            {isStaff && manual && (
+            {!manual ? (
               <Button asChild variant="outline" className="h-11 w-full sm:w-auto">
-                <Link href={`/client/${clientId}/integrations?tab=links&event=${e.id}`}>
-                  <Link2 className="mr-2 h-4 w-4" />Link products and campaigns
+                <Link href={`/client/${clientId}/registry/${e.id}`}>Full results</Link>
+              </Button>
+            ) : isStaff && (
+              <Button asChild variant="outline" className="h-11 w-full sm:w-auto">
+                <Link href={`/client/${clientId}/registry`}>
+                  <Link2 className="mr-2 h-4 w-4" />Add to the event registry
                 </Link>
               </Button>
             )}
