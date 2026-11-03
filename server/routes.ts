@@ -21,6 +21,7 @@ import { activityLogger, registerActivityRoutes } from "./activity-log";
 import { registerMetaCampaignRoutes } from "./meta-campaigns";
 import { registerIntegrationRoutes } from "./integrations/routes";
 import { registerMoneyRoutes } from "./money";
+import { registerClientTeamRoutes } from "./client-team";
 import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
@@ -212,6 +213,16 @@ export function registerApiRoutes(app: Express): void {
     { method: "GET", path: /^\/api\/clients\/\d+\/portal-summary\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/money-summary\/?$/ },
     { method: "POST", path: /^\/api\/clients\/\d+\/money-summary\/refresh\/?$/ },
+    // Team: everyone can read; the handlers allow writes only for workspace owners.
+    { method: "GET", path: /^\/api\/clients\/\d+\/team\/?$/ },
+    { method: "POST", path: /^\/api\/clients\/\d+\/team\/?$/ },
+    { method: "PATCH", path: /^\/api\/clients\/\d+\/team\/[^/]+\/?$/ },
+    { method: "DELETE", path: /^\/api\/clients\/\d+\/team\/(?:invites\/\d+|[^/]+)\/?$/ },
+    // Invite and password-reset pages also work while signed in.
+    { method: "GET", path: /^\/api\/invites\/[^/]+\/?$/ },
+    { method: "POST", path: /^\/api\/invites\/[^/]+\/accept\/?$/ },
+    { method: "POST", path: /^\/api\/password\/(?:forgot|reset)\/?$/ },
+    { method: "GET", path: /^\/api\/password\/reset\/[^/]+\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/projections\/?$/ },
     { method: "POST", path: /^\/api\/clients\/\d+\/projections\/?$/ },
     { method: "PATCH", path: /^\/api\/projections\/\d+\/?$/ },
@@ -3032,4 +3043,5 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
   registerMetaCampaignRoutes(app, getRequestUser, canAccessClient);
   registerIntegrationRoutes(app, getRequestUser);
   registerMoneyRoutes(app, getRequestUser);
+  registerClientTeamRoutes(app, getRequestUser, canAccessClient);
 }

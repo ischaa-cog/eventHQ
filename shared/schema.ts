@@ -26,6 +26,9 @@ export const users = pgTable("users", {
   role: varchar("role").default("agency_employee"), // default is fail-closed for uninvited users
   agencyId: integer("agency_id"),
   clientAccess: integer("client_access").array(), // assigned client for client accounts
+  // Inside a client workspace: "owner" manages the team, "member" only views. Null for staff;
+  // a client login with no value counts as an owner (accounts made before team roles existed).
+  clientRole: varchar("client_role"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -286,6 +289,7 @@ export const invites = pgTable("invites", {
   expiresAt: timestamp("expires_at"),
   usedAt: timestamp("used_at"),
   usedById: varchar("used_by_id").references(() => users.id),
+  clientRole: text("client_role"), // "owner" | "member" for client team invites
 });
 
 export const insertInviteSchema = createInsertSchema(invites).omit({ id: true, createdAt: true });
@@ -748,3 +752,20 @@ export const eventAttributionRules = pgTable("event_attribution_rules", {
   index("idx_event_attribution_event").on(table.eventPerformanceId),
 ]);
 export type EventAttributionRule = typeof eventAttributionRules.$inferSelect;
+
+// PASSWORD RESET: one-time links sent by email. Only a SHA-256 of the token is stored.
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// LOGIN RATE LIMITS: shared by every server instance, keyed like "ip:1.2.3.4" or "email:a@b.com".
+export const loginAttempts = pgTable("login_attempts", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});
