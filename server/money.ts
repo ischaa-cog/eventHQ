@@ -9,7 +9,14 @@ import { adSpendDaily, eventPerformance, integrationConnections, sales, type Use
 import { db } from "./storage";
 import { isAuthenticated } from "./auth";
 import { eventReports } from "./registry/metrics";
-import { syncStale } from "./integrations/sync";
+import { syncConnection, syncStale } from "./integrations/sync";
+import { createHmac, timingSafeEqual } from "crypto";
+import { appUrl } from "./config";
+
+// Signs internal calls from the cron fan-out to the per-connection sync.
+function internalToken(connectionId: number) {
+  return createHmac("sha256", process.env.CRON_SECRET || process.env.SESSION_SECRET || "").update(`cron-sync-one:${connectionId}`).digest("hex");
+}
 
 type GetUser = (req: any) => Promise<User | undefined>;
 
@@ -242,10 +249,36 @@ export function registerMoneyRoutes(app: Express, getRequestUser: GetUser) {
     const secret = process.env.CRON_SECRET;
     if (secret && req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized" });
     try {
+      // On Vercel each connection syncs in its own function call, in parallel, so every account
+      // gets a full time budget. Locally (or if fan-out fails) they run here one after another.
+      const due = (await db.select().from(integrationConnections).where(eq(integrationConnections.status, "active")))
+        .filter((c) => !c.lastSyncAt || c.lastSyncAt.getTime() < Date.now() - 30 * 60_000);
+      if (process.env.VERCEL && due.length > 1) {
+        const results = await Promise.allSettled(due.map((c) => fetch(`${appUrl()}/api/cron/sync-one/${c.id}?t=${internalToken(c.id)}`)
+          .then((r) => r.json())));
+        return res.json({ fannedOut: due.length, results: results.map((r) => (r.status === "fulfilled" ? r.value : { error: String(r.reason) })) });
+      }
       res.json(await syncStale({ staleMinutes: 30, budgetMs: 50_000 }));
     } catch (error: any) {
       console.error("[cron] sync failed:", error);
       res.status(500).json({ error: "Sync failed" });
+    }
+  });
+
+  // One connection's scheduled sync, called by the cron fan-out above with a signed token.
+  app.get("/api/cron/sync-one/:id", async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const token = String(req.query.t ?? "");
+    const expected = internalToken(id);
+    if (token.length !== expected.length || !timingSafeEqual(Buffer.from(token), Buffer.from(expected))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const [row] = await db.select().from(integrationConnections).where(eq(integrationConnections.id, id));
+    if (!row || row.status !== "active") return res.status(404).json({ error: "Not found" });
+    try {
+      res.json(await syncConnection(row, { deadline: Date.now() + 50_000 }));
+    } catch (error: any) {
+      res.status(502).json({ connectionId: id, error: error.message });
     }
   });
 }
