@@ -3,7 +3,7 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import connectPg from "connect-pg-simple";
 import type { User } from "@shared/schema";
-import { storage } from "./storage";
+import { storage, pool } from "./storage";
 import { verifyAgainstNothing, verifyPassword } from "./passwords";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -44,7 +44,7 @@ export const enforceDemoReadOnly: RequestHandler = (req, res, next) => {
 export function getSession() {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
+    pool, // reuse the app pool so each instance holds one set of connections, not two
     createTableIfMissing: false,
     ttl: SESSION_TTL_MS,
     tableName: "sessions",

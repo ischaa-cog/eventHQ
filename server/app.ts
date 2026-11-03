@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { registerRoutes } from "./routes";
+import { checkConfig } from "./config";
 
 declare module "http" {
   interface IncomingMessage {
@@ -21,6 +22,7 @@ export function log(message: string, source = "express") {
 
 // The API app, shared by the long-running server (server/index.ts) and the Vercel function (server/vercel.ts).
 export async function createApp(): Promise<{ app: express.Express; httpServer: Server }> {
+  checkConfig();
   const app = express();
   const httpServer = createServer(app);
 
@@ -55,8 +57,9 @@ export async function createApp(): Promise<{ app: express.Express; httpServer: S
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    res.status(status).json({ message });
-    throw err;
+    if (status >= 500) console.error("[api] unhandled error:", err);
+    if (res.headersSent) return;
+    res.status(status).json({ message: status >= 500 ? "Internal Server Error" : message });
   });
 
   return { app, httpServer };

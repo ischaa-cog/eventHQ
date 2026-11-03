@@ -7,6 +7,7 @@ import { build as viteBuild } from "vite";
 import { cp, mkdir, readFile, rm, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
+import { runMigrations } from "./migrate";
 
 const OUT = ".vercel/output";
 const FUNC = `${OUT}/functions/api.func`;
@@ -30,6 +31,15 @@ async function copyWithDependencies(name: string, seen = new Set<string>()) {
 }
 
 async function buildVercel() {
+  // Production deploys migrate the database first. Preview deploys never touch it,
+  // because previews may share the production DATABASE_URL.
+  if (process.env.VERCEL_ENV === "production") {
+    console.log("running database migrations...");
+    await runMigrations();
+  } else {
+    console.log(`skipping migrations (VERCEL_ENV=${process.env.VERCEL_ENV ?? "unset"})`);
+  }
+
   await rm(OUT, { recursive: true, force: true });
 
   console.log("building client...");

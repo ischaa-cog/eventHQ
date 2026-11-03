@@ -2,6 +2,7 @@ import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { randomUUID } from "crypto";
 import { storage, db } from "./storage";
+import { appUrl } from "./config";
 import { insertClientSchema, insertEventSchema, insertAssetSchema, insertVaultAssetSchema, insertWebinarSchema, insertNotificationSchema, insertCalendarEntrySchema, sales as salesTable, salesSources, clientCalendarConnections, notificationRecipients, type User } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import OpenAI from "openai";
@@ -213,7 +214,15 @@ export function registerApiRoutes(app: Express): void {
   ];
   app.use(async (req: any, res, next) => {
     if (!req.path.startsWith("/api/")) return next();
-    const user = await getRequestUser(req);
+    let user: User | undefined;
+    try {
+      user = await getRequestUser(req);
+    } catch (error) {
+      // Without this, a database outage leaves every API request hanging until the function times out.
+      console.error("[api] could not load the signed-in user:", (error as Error).message);
+      return res.status(503).json({ error: "Service temporarily unavailable. Try again shortly." });
+    }
+    req.eventhqUser = user;
     if (user?.role === "agency_employee") {
       return res.status(403).json({ error: "This account is disabled. Contact an administrator." });
     }
@@ -221,6 +230,21 @@ export function registerApiRoutes(app: Express): void {
     const path = (req.originalUrl || req.path).split("?")[0];
     if (clientPortalActions.some(action => action.method === req.method && action.path.test(path))) {
       return next();
+    }
+    return forbidden(res);
+  });
+
+  // Central tenant check for every /api/clients/:clientId/... route. Handlers still check too,
+  // but a new route that forgets to can no longer leak another client's data.
+  // Unauthenticated requests fall through to each route's own isAuthenticated (401).
+  app.use("/api/clients/:clientId", async (req: any, res, next) => {
+    const clientId = Number(req.params.clientId);
+    if (!/^\d+$/.test(req.params.clientId) || !req.eventhqUser) return next();
+    try {
+      if (await canAccessClient(req.eventhqUser, clientId)) return next();
+    } catch (error) {
+      console.error("[api] client access check failed:", (error as Error).message);
+      return res.status(503).json({ error: "Service temporarily unavailable. Try again shortly." });
     }
     return forbidden(res);
   });
@@ -1442,16 +1466,12 @@ export function registerApiRoutes(app: Express): void {
         }
       }
       
-      const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-        : "http://localhost:5000";
+      const baseUrl = appUrl();
       
       res.redirect(`${baseUrl}/client/${clientId}/workspace?gdrive=connected`);
     } catch (error: any) {
       console.error("Google Drive callback failed");
-      const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-        : "http://localhost:5000";
+      const baseUrl = appUrl();
       res.redirect(`${baseUrl}?gdrive_error=connection_failed`);
     }
   });
