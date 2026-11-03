@@ -32,6 +32,10 @@ const TalkToNeoPage = lazy(() => import("@/pages/talk-to-neo"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const MoneyDashboardPage = lazy(() => import("@/pages/money-dashboard"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations"));
+const ClientTeamPage = lazy(() => import("@/pages/client-team"));
+const ForgotPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ResetPasswordPage })));
+const AcceptInvitePage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.AcceptInvitePage })));
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -183,6 +187,9 @@ function Router() {
         <Route path="/access-denied" component={AccessDeniedPage} />
         <Route path="/admin-login" component={() => <ClientLogin mode="admin" />} />
         <Route path="/client-login" component={() => <ClientLogin />} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/reset-password/:token" component={ResetPasswordPage} />
+        <Route path="/accept-invite/:token" component={AcceptInvitePage} />
         <Route path="/" component={Landing} />
         <Route component={Landing} />
       </Switch>
@@ -195,7 +202,10 @@ function Router() {
       <Route path="/access-denied" component={AccessDeniedPage} />
       <Route path="/admin-login" component={() => <ClientLogin mode="admin" />} />
       <Route path="/client-login" component={() => <ClientLogin />} />
-      
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password/:token" component={ResetPasswordPage} />
+      <Route path="/accept-invite/:token" component={AcceptInvitePage} />
+
       {/* Client-first overview and workspace selection */}
       <Route path="/" component={user?.role === "agency_client" ? ClientStart : DashboardPage} />
       <Route path="/clients" component={() => <InternalOnlyFeature><ClientsPage /></InternalOnlyFeature>} />
@@ -209,6 +219,7 @@ function Router() {
       <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><MoneyDashboardPage /></ClientPortalFeature>} />
       <Route path="/client/:id/overview" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
       <Route path="/client/:id/integrations" component={() => <InternalOnlyFeature><IntegrationsPage /></InternalOnlyFeature>} />
+      <Route path="/client/:id/team" component={() => <ClientPortalFeature><ClientTeamPage /></ClientPortalFeature>} />
       <Route path="/client/:id/onboarding" component={() => <InternalOnlyFeature><ClientOnboardingPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/workspace" component={() => <InternalOnlyFeature><ClientWorkspacePage /></InternalOnlyFeature>} />
       {/* Event Builder (client/src/pages/event-builder.tsx) is hidden for now; re-add its route here to bring it back. */}
