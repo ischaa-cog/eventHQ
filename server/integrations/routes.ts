@@ -51,7 +51,8 @@ export function registerIntegrationRoutes(app: Express, getRequestUser: GetUser)
     if (!await requireAdmin(req, res)) return;
     const parsed = connectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid connection" });
-    const row = await saveConnection({ clientId: clientIdOf(req), ...parsed.data });
+    // A key typed here replaces any agency login the connection used before.
+    const row = await saveConnection({ clientId: clientIdOf(req), ...parsed.data, ...(parsed.data.credentials ? { grantId: null } : {}) });
     res.json({ ...toPublic(row), webhookUrl: webhookUrlFor(row.provider, row.id) });
   });
 

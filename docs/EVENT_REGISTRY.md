@@ -48,6 +48,8 @@ Neo answers event questions from these computed tables only, names the Event ID 
 | Fanbasis | Transactions and refunds | API key |
 | HighLevel | Opt-ins with the page they came from | Private integration token + location ID |
 
+Meta and HighLevel can also use one agency login for every workspace, and clients can connect Stripe, Whop and Fanbasis themselves from a connect link. See [CONNECTING_ACCOUNTS.md](CONNECTING_ACCOUNTS.md).
+
 `script/connect-partners.ts` connects many workspaces at once from a credentials file and a mapping file (see the comment at the top of the script).
 
 ## Settings

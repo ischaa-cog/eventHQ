@@ -20,6 +20,7 @@ import { registerWhopWebhook } from "./whop-webhook";
 import { activityLogger, registerActivityRoutes } from "./activity-log";
 import { registerMetaCampaignRoutes } from "./meta-campaigns";
 import { registerIntegrationRoutes } from "./integrations/routes";
+import { registerOAuthRoutes } from "./integrations/oauth-routes";
 import { registerMoneyRoutes } from "./money";
 import { registerRegistryRoutes } from "./registry/routes";
 import { neoEventContext } from "./registry/neo";
@@ -3052,6 +3053,7 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
   registerActivityRoutes(app, getRequestUser);
   registerMetaCampaignRoutes(app, getRequestUser, canAccessClient);
   registerIntegrationRoutes(app, getRequestUser);
+  registerOAuthRoutes(app, getRequestUser);
   registerMoneyRoutes(app, getRequestUser);
   registerRegistryRoutes(app, getRequestUser);
   registerClientTeamRoutes(app, getRequestUser, canAccessClient);

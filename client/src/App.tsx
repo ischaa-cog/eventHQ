@@ -39,6 +39,7 @@ const ClientTeamPage = lazy(() => import("@/pages/client-team"));
 const ForgotPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.ResetPasswordPage })));
 const AcceptInvitePage = lazy(() => import("@/pages/account-pages").then((m) => ({ default: m.AcceptInvitePage })));
+const ConnectLinkPage = lazy(() => import("@/pages/connect-link"));
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -193,6 +194,7 @@ function Router() {
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route path="/reset-password/:token" component={ResetPasswordPage} />
         <Route path="/accept-invite/:token" component={AcceptInvitePage} />
+        <Route path="/connect/:token" component={ConnectLinkPage} />
         <Route path="/" component={Landing} />
         <Route component={Landing} />
       </Switch>
@@ -208,6 +210,7 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password/:token" component={ResetPasswordPage} />
       <Route path="/accept-invite/:token" component={AcceptInvitePage} />
+      <Route path="/connect/:token" component={ConnectLinkPage} />
 
       {/* Client-first overview and workspace selection */}
       <Route path="/" component={user?.role === "agency_client" ? ClientStart : DashboardPage} />

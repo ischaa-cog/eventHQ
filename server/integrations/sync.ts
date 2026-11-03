@@ -8,6 +8,7 @@ import { adSpendDaily, integrationConnections, optIns, sales, salesSources, type
 import { db } from "../storage";
 import { whopEventToSale } from "../whop-webhook";
 import { credentialsOf, markFailed, markSynced } from "./connections";
+import { connectionAuth } from "./oauth";
 import { rematchClient } from "../registry/match";
 import { normalizeUrl } from "../registry/normalize";
 
@@ -375,9 +376,11 @@ export function stripeRefundRecords(
 // lastSyncCursor holds the end of the last finished chunk, so a run cut off by the time limit
 // resumes there. Each run also re-reads the last 2 days, and all refunds in the sync window.
 async function syncStripe(connection: IntegrationConnection, since: Date, opts: SyncOptions) {
-  const { secretKey } = credentialsOf(connection);
+  // A Stripe sign-in made through Composio routes these requests through its proxy.
+  const auth = await connectionAuth(connection, opts.fetchImpl);
+  const { secretKey } = auth.creds;
   if (!secretKey) throw new Error("Stripe key missing");
-  const f = opts.fetchImpl ?? fetch;
+  const f = auth.fetchImpl ?? opts.fetchImpl ?? fetch;
   const CHUNK = 3 * DAY_MS;
   const cursor = connection.lastSyncCursor ? new Date(Number(connection.lastSyncCursor)) : null;
   let from = cursor && cursor > since ? new Date(cursor.getTime() - 2 * DAY_MS) : since;
@@ -477,11 +480,12 @@ export function adLandingUrl(ad: any): string | null {
 }
 
 async function syncMeta(connection: IntegrationConnection, since: Date, opts: SyncOptions) {
-  const { accessToken, appSecret } = credentialsOf(connection);
+  const { accessToken, appSecret } = (await connectionAuth(connection, opts.fetchImpl)).creds;
   const accountId = connection.externalAccountId.replace(/^act_/, "");
   if (!accessToken || !accountId) throw new Error("Meta access token or ad account id missing");
   const f = opts.fetchImpl ?? fetch;
-  const secret = appSecret || process.env.META_APP_SECRET;
+  // Only the secret of the app that issued the token works; an agency login brings its own.
+  const secret = appSecret;
   const proof = secret ? createHmac("sha256", secret).update(accessToken).digest("hex") : null;
   const auth = { Authorization: `Bearer ${accessToken}` };
   const page = async (first: string) => {
@@ -497,9 +501,13 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
   };
   // One-week windows, four at a time, saved as each arrives: Meta answers large ad-level
   // requests slowly, so small windows keep every request well inside the time limit.
+  // A run cut off by the time limit leaves lastSyncCursor at the next window to fetch, and the
+  // next run carries on from there. A finished run clears it, so later syncs refresh 30 days.
   const WEEK = 7 * DAY_MS;
+  const resume = connection.lastSyncCursor ? Number(connection.lastSyncCursor) : NaN;
+  const start = Number.isFinite(resume) && resume > since.getTime() && resume <= Date.now() ? resume : since.getTime();
   const windows: Array<[string, string]> = [];
-  for (let t = since.getTime(); t <= Date.now(); t += WEEK) {
+  for (let t = start; t <= Date.now(); t += WEEK) {
     windows.push([new Date(t).toISOString().slice(0, 10), new Date(Math.min(t + WEEK - DAY_MS, Date.now())).toISOString().slice(0, 10)]);
   }
   const landing = new Map<string, string | null>();
@@ -559,7 +567,11 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
       });
     }
     saved += rows.length;
+    const batch = windows.slice(i, i + 4);
+    const next = Date.parse(`${batch[batch.length - 1][1]}T00:00:00Z`) + DAY_MS;
+    await db.update(integrationConnections).set({ lastSyncCursor: String(next) }).where(eq(integrationConnections.id, connection.id));
   }
+  await db.update(integrationConnections).set({ lastSyncCursor: null }).where(eq(integrationConnections.id, connection.id));
   return { spendRows: saved };
 }
 
@@ -584,7 +596,7 @@ export function highlevelOptIns(submissions: any[]) {
 }
 
 async function syncHighLevel(connection: IntegrationConnection, since: Date, opts: SyncOptions) {
-  const { apiKey } = credentialsOf(connection);
+  const { apiKey } = (await connectionAuth(connection, opts.fetchImpl)).creds;
   const locationId = connection.externalAccountId;
   if (!apiKey || !locationId) throw new Error("HighLevel token or location id missing");
   const f = opts.fetchImpl ?? fetch;

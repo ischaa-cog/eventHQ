@@ -715,6 +715,30 @@ export type MetaAdCampaign = typeof metaAdCampaigns.$inferSelect;
 export const INTEGRATION_PROVIDERS = ["meta", "whop", "stripe", "fanbasis", "highlevel"] as const;
 export type IntegrationProvider = typeof INTEGRATION_PROVIDERS[number];
 
+// AGENCY LOGINS
+// One login that reaches many client accounts: a Meta user or system user token that sees every ad
+// account shared with the agency, or a HighLevel agency install that covers its sub-accounts.
+// Connections created from a login point at it with grantId and borrow its token at sync time.
+export const OAUTH_GRANT_PROVIDERS = ["meta", "highlevel"] as const;
+export const oauthGrants = pgTable("oauth_grants", {
+  id: serial("id").primaryKey(),
+  provider: text("provider").notNull(),
+  // The provider's id for whoever logged in: Meta user id, HighLevel company id.
+  accountRef: text("account_ref").notNull(),
+  displayName: text("display_name"),
+  source: text("source").notNull().default("oauth"), // oauth | token
+  credentialsCiphertext: text("credentials_ciphertext").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  status: text("status").notNull().default("active"), // active | error
+  lastError: text("last_error"),
+  createdByUserId: varchar("created_by_user_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("oauth_grants_provider_account_idx").on(table.provider, table.accountRef),
+]);
+export type OAuthGrant = typeof oauthGrants.$inferSelect;
+
 export const integrationConnections = pgTable("integration_connections", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
@@ -731,6 +755,8 @@ export const integrationConnections = pgTable("integration_connections", {
   lastSyncCursor: text("last_sync_cursor"),
   lastError: text("last_error"),
   lastWebhookAt: timestamp("last_webhook_at", { withTimezone: true }),
+  // Set when the connection uses an agency login instead of its own key.
+  grantId: integer("grant_id").references(() => oauthGrants.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [

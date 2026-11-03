@@ -10,13 +10,11 @@ import { db } from "./storage";
 import { isAuthenticated } from "./auth";
 import { eventReports } from "./registry/metrics";
 import { syncConnection, syncStale } from "./integrations/sync";
-import { createHmac, timingSafeEqual } from "crypto";
+import { internalToken, kickSync, MAX_HOPS } from "./integrations/kick";
+import { timingSafeEqual } from "crypto";
 import { appUrl } from "./config";
 
 // Signs internal calls from the cron fan-out to the per-connection sync.
-function internalToken(connectionId: number) {
-  return createHmac("sha256", process.env.CRON_SECRET || process.env.SESSION_SECRET || "").update(`cron-sync-one:${connectionId}`).digest("hex");
-}
 
 type GetUser = (req: any) => Promise<User | undefined>;
 
@@ -276,7 +274,11 @@ export function registerMoneyRoutes(app: Express, getRequestUser: GetUser) {
     const [row] = await db.select().from(integrationConnections).where(eq(integrationConnections.id, id));
     if (!row || row.status !== "active") return res.status(404).json({ error: "Not found" });
     try {
-      res.json(await syncConnection(row, { deadline: Date.now() + 50_000 }));
+      const result = await syncConnection(row, { deadline: Date.now() + 50_000 });
+      // A long first sync stops at the time limit; carry on in a fresh call.
+      const hop = Number(req.query.hop) || 0;
+      if (!result.complete && hop + 1 < MAX_HOPS) await kickSync(id, hop + 1);
+      res.json(result);
     } catch (error: any) {
       res.status(502).json({ connectionId: id, error: error.message });
     }

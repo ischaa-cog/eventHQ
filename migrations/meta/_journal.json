@@ -15,6 +15,13 @@
       "when": 1793727793288,
       "tag": "0001_integrations_registry_teams",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793741757582,
+      "tag": "0002_agency_logins",
+      "breakpoints": true
     }
   ]
 }

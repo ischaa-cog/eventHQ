@@ -1,11 +1,11 @@
 // Admin page for one client: connect sales and ad accounts, and link products and campaigns to events.
 // Secrets typed here go to the server once and are stored encrypted; the page only ever shows a
 // masked hint ("rk_live_…a1b2") afterwards.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { CheckCircle2, Copy, Loader2, Plus, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Copy, KeyRound, Link2, Loader2, LogIn, Plus, RefreshCw, Search, Trash2, TriangleAlert } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,21 @@ type Connection = {
   id: number; provider: string; externalAccountId: string; displayName: string | null; status: string;
   lastSyncAt: string | null; lastWebhookAt: string | null; lastError: string | null; hasWebhookSecret: boolean;
   credentialHints: Record<string, string>; webhookUrl: string | null;
+  via?: "agency" | "stripe-oauth" | "key"; grantId?: number | null;
 };
+
+type Grant = {
+  id: number; provider: "meta" | "highlevel"; displayName: string | null; accountRef: string; status: "active" | "error";
+  expiresAt: string | null; lastError: string | null; createdAt: string; source: "oauth" | "token";
+};
+type OAuthStatus = {
+  meta: { configured: boolean }; highlevel: { configured: boolean }; composio: { configured: boolean }; grants: Grant[];
+};
+type GrantAccount = { id: string; name: string; detail: string | null; connectedTo: Array<{ clientId: number; clientName: string }> };
+
+const OAUTH_STATUS_KEY = ["/api/oauth/status"];
+const OAUTH_NAMES: Record<string, string> = { meta: "Meta", highlevel: "HighLevel", stripe: "Stripe" };
+const currentPath = () => window.location.pathname;
 
 type Field = { key: string; label: string; placeholder?: string; secret?: boolean; required?: boolean; help?: string };
 const PROVIDERS: Record<string, { name: string; blurb: string; account?: Field; fields: Field[]; webhookSecret?: Field }> = {
@@ -70,6 +84,7 @@ export default function IntegrationsPage() {
   const { id: clientId } = useParams<{ id: string }>();
   const { user } = useAuth();
   const isAdmin = user?.role === "owner" || user?.role === "agency_admin";
+  useOAuthReturnToast();
 
   return (
     <AppLayout mode="client" title="Integrations" pageContext="Integrations">
@@ -78,7 +93,13 @@ export default function IntegrationsPage() {
           <h1 className="font-heading text-2xl font-bold tracking-tight md:text-3xl">Integrations</h1>
           <p className="text-sm text-muted-foreground">Where this client's revenue and ad spend come from.</p>
         </header>
-        {isAdmin ? <Connections clientId={clientId!} /> : <p className="text-sm text-muted-foreground">Only admins can manage connections.</p>}
+        {isAdmin ? (
+          <>
+            <AgencyLogins />
+            <Connections clientId={clientId!} />
+            <ConnectLinkCard clientId={clientId!} />
+          </>
+        ) : <p className="text-sm text-muted-foreground">Only admins can manage connections.</p>}
         <Card className="rounded-xl">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">Which ads, opt-ins and sales belong to which event is set in Event Results, by dates, page links and product names.</p>
@@ -93,13 +114,18 @@ export default function IntegrationsPage() {
 function Connections({ clientId }: { clientId: string }) {
   const key = [`/api/clients/${clientId}/integrations`];
   const { data: connections = [], isLoading } = useQuery<Connection[]>({ queryKey: key });
+  const { data: status } = useQuery<OAuthStatus>({ queryKey: OAUTH_STATUS_KEY });
   const [adding, setAdding] = useState<string | null>(null);
+  const activeGrant = (provider: string) => status?.grants.find((g) => g.provider === provider && g.status === "active");
 
   if (isLoading) return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />;
   return (
     <div className="space-y-4">
       {Object.entries(PROVIDERS).map(([provider, info]) => {
         const rows = connections.filter((c) => c.provider === provider);
+        const grant = provider === "meta" || provider === "highlevel" ? activeGrant(provider) : undefined;
+        const stripeOAuth = provider === "stripe" && !!status?.composio.configured;
+        const hasPrimary = !!grant || stripeOAuth;
         return (
           <Card key={provider} className="rounded-xl">
             <CardHeader className="pb-3">
@@ -113,8 +139,14 @@ function Connections({ clientId }: { clientId: string }) {
             </CardHeader>
             <CardContent className="space-y-3">
               {rows.map((c) => <ConnectionRow key={c.id} connection={c} clientId={clientId} />)}
+              {grant && <GrantPicker grant={grant} clientId={clientId} />}
+              {stripeOAuth && <StripeOAuthButton clientId={clientId} />}
               {adding === provider ? (
                 <ConnectForm provider={provider} clientId={clientId} onDone={() => setAdding(null)} />
+              ) : hasPrimary ? (
+                <Button variant="ghost" className="h-11 w-full sm:w-auto" onClick={() => setAdding(provider)} data-testid={`button-add-${provider}`}>
+                  <KeyRound className="mr-2 h-4 w-4" />Enter a key instead
+                </Button>
               ) : (
                 <Button variant="outline" className="h-11 w-full sm:w-auto" onClick={() => setAdding(provider)} data-testid={`button-add-${provider}`}>
                   <Plus className="mr-2 h-4 w-4" />{rows.length ? `Add another ${info.name} account` : `Connect ${info.name}`}
@@ -163,6 +195,8 @@ function ConnectionRow({ connection: c, clientId }: { connection: Connection; cl
           <p className="flex items-center gap-1.5 font-medium">
             {ok ? <CheckCircle2 className="h-4 w-4 text-emerald-400" /> : <TriangleAlert className="h-4 w-4 text-amber-400" />}
             <span className="truncate">{c.displayName || c.externalAccountId || PROVIDERS[c.provider]?.name}</span>
+            {c.via === "agency" && <Badge variant="secondary" className="shrink-0 text-[10px]">Agency login</Badge>}
+            {c.via === "stripe-oauth" && <Badge variant="secondary" className="shrink-0 text-[10px]">Stripe login</Badge>}
           </p>
           <p className="text-xs text-muted-foreground">
             Last sync {ago(c.lastSyncAt)}{c.lastWebhookAt ? ` · last webhook ${ago(c.lastWebhookAt)}` : ""}
@@ -264,5 +298,257 @@ function ConnectForm({ provider, clientId, onDone }: { provider: string; clientI
         <Button type="button" variant="ghost" className="h-11" onClick={onDone}>Cancel</Button>
       </div>
     </form>
+  );
+}
+
+// ---------- OAuth: agency logins, account pickers, Stripe login, client connect link ----------
+
+// Shows a toast after the server sends the browser back from an OAuth login, then cleans the URL.
+function useOAuthReturnToast() {
+  const { toast } = useToast();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ok = params.get("oauth");
+    const error = params.get("oauth_error");
+    if (!ok && !error) return;
+    const provider = OAUTH_NAMES[params.get("provider") ?? ""] ?? "Account";
+    if (error) toast({ title: "Login did not finish", description: error, variant: "destructive" });
+    else toast({ title: `${provider} connected` });
+    ["oauth", "oauth_error", "provider"].forEach((k) => params.delete(k));
+    const rest = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
+  }, [toast]);
+}
+
+const startLogin = (provider: "meta" | "highlevel") => {
+  window.location.href = `/api/oauth/${provider}/start?returnTo=${encodeURIComponent(currentPath())}`;
+};
+
+function AgencyLogins() {
+  const { data: status, isLoading } = useQuery<OAuthStatus>({ queryKey: OAUTH_STATUS_KEY });
+  return (
+    <Card className="rounded-xl">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Agency logins</CardTitle>
+        <CardDescription>Log in once for the whole agency. Then each workspace just picks its account from a list.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading || !status ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : (
+          <>
+            <AgencyLoginRow provider="meta" label="Meta Ads" status={status} />
+            <AgencyLoginRow provider="highlevel" label="HighLevel" status={status} />
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AgencyLoginRow({ provider, label, status }: { provider: "meta" | "highlevel"; label: string; status: OAuthStatus }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [pasting, setPasting] = useState(false);
+  const grants = status.grants.filter((g) => g.provider === provider);
+  const configured = status[provider].configured;
+  const remove = useMutation({
+    mutationFn: async (id: number) => (await apiRequest("DELETE", `/api/oauth/grants/${id}`)).json(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: OAUTH_STATUS_KEY }),
+    onError: (e) => toast({ title: "Could not remove", description: errorText(e), variant: "destructive" }),
+  });
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <p className="font-medium">{label}</p>
+      {grants.map((g) => (
+        <div key={g.id} className="space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-sm">
+                {g.status === "active" ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" /> : <TriangleAlert className="h-4 w-4 shrink-0 text-amber-400" />}
+                <span className="truncate">{g.displayName || g.accountRef}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {g.source === "token" ? "System user token" : "Logged in"}
+                {g.expiresAt ? ` · expires ${format(new Date(g.expiresAt), "MMM d")}` : ""}
+              </p>
+            </div>
+            <Button
+              variant="ghost" size="icon" className="h-11 w-11 shrink-0 text-muted-foreground" aria-label={`Remove ${label} login`}
+              onClick={() => { if (window.confirm(`Remove this ${label} login? Workspaces using it stop syncing until you log in again.`)) remove.mutate(g.id); }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+          {g.lastError && <p className="rounded bg-amber-500/10 p-2 text-xs text-amber-200">{g.lastError}</p>}
+          {configured && g.source === "oauth" && (
+            <Button variant="outline" className="h-11 w-full sm:w-auto" onClick={() => startLogin(provider)}>
+              <RefreshCw className="mr-2 h-4 w-4" />Reconnect
+            </Button>
+          )}
+        </div>
+      ))}
+      {grants.length === 0 && (configured ? (
+        <Button className="h-11 w-full sm:w-auto" onClick={() => startLogin(provider)} data-testid={`button-login-${provider}`}>
+          <LogIn className="mr-2 h-4 w-4" />{provider === "meta" ? "Log in with Facebook" : "Log in with HighLevel"}
+        </Button>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {provider === "meta" ? "Login needs the Meta app keys in Vercel." : "Login needs the HighLevel app keys in Vercel."}
+        </p>
+      ))}
+      {provider === "meta" && grants.length === 0 && (
+        pasting ? <MetaTokenForm onDone={() => setPasting(false)} /> : (
+          <Button variant="ghost" className="h-11 w-full sm:w-auto" onClick={() => setPasting(true)}>
+            <KeyRound className="mr-2 h-4 w-4" />Paste a system user token instead
+          </Button>
+        )
+      )}
+    </div>
+  );
+}
+
+function MetaTokenForm({ onDone }: { onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [accessToken, setAccessToken] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const save = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/oauth/grants/meta-token", {
+      accessToken: accessToken.trim(), ...(appSecret.trim() ? { appSecret: appSecret.trim() } : {}),
+    })).json(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: OAUTH_STATUS_KEY });
+      toast({ title: "Meta connected" });
+      onDone();
+    },
+    onError: (e) => toast({ title: "Could not save the token", description: errorText(e), variant: "destructive" }),
+  });
+  return (
+    <form className="space-y-3" autoComplete="off" onSubmit={(e) => { e.preventDefault(); if (accessToken.trim()) save.mutate(); }}>
+      <div className="space-y-1">
+        <Label htmlFor="meta-grant-token">System user token</Label>
+        <Input id="meta-grant-token" type="password" className="h-11" autoComplete="off" spellCheck={false} value={accessToken} onChange={(e) => setAccessToken(e.target.value)} />
+        <p className="text-xs text-muted-foreground">Business Settings → System users → Generate token, with ads_read.</p>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="meta-grant-secret">App secret (optional)</Label>
+        <Input id="meta-grant-secret" type="password" className="h-11" autoComplete="off" spellCheck={false} value={appSecret} onChange={(e) => setAppSecret(e.target.value)} />
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button type="submit" className="h-11" disabled={!accessToken.trim() || save.isPending}>
+          {save.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking…</> : "Save token"}
+        </Button>
+        <Button type="button" variant="ghost" className="h-11" onClick={onDone}>Cancel</Button>
+      </div>
+    </form>
+  );
+}
+
+// Lists the ad accounts (Meta) or sub-accounts (HighLevel) the agency login can see; picking one connects it here.
+function GrantPicker({ grant, clientId }: { grant: Grant; clientId: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const noun = grant.provider === "meta" ? "ad account" : "sub-account";
+  const { data, isLoading, error } = useQuery<{ accounts: GrantAccount[] }>({
+    queryKey: [`/api/oauth/grants/${grant.id}/accounts`], enabled: open,
+  });
+  const accounts = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const list = data?.accounts ?? [];
+    return q ? list.filter((a) => `${a.name} ${a.id} ${a.detail ?? ""}`.toLowerCase().includes(q)) : list;
+  }, [data, filter]);
+  const pick = useMutation({
+    mutationFn: async (a: GrantAccount) => (await apiRequest("POST", `/api/clients/${clientId}/integrations/from-grant`, {
+      grantId: grant.id, accountId: a.id, accountName: a.name,
+    })).json(),
+    onSuccess: (_r, a) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/integrations`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/oauth/grants/${grant.id}/accounts`] });
+      toast({ title: `${a.name} connected`, description: "The first sync is running. Numbers fill in over the next few minutes." });
+      setOpen(false);
+      setFilter("");
+    },
+    onError: (e) => toast({ title: "Could not connect", description: errorText(e), variant: "destructive" }),
+  });
+  if (!open) {
+    return (
+      <Button className="h-11 w-full sm:w-auto" onClick={() => setOpen(true)} data-testid={`button-pick-${grant.provider}`}>
+        <Search className="mr-2 h-4 w-4" />{grant.provider === "meta" ? "Pick an ad account" : "Pick a sub-account"}
+      </Button>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <div className="flex gap-2">
+        <Input autoFocus className="h-11" placeholder={`Search ${noun}s`} value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <Button variant="ghost" className="h-11 shrink-0" onClick={() => { setOpen(false); setFilter(""); }}>Cancel</Button>
+      </div>
+      {isLoading ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : error ? (
+        <p className="text-xs text-amber-200">{errorText(error)}</p>
+      ) : accounts.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{data?.accounts.length ? "Nothing matches." : `This login can't see any ${noun}s yet.`}</p>
+      ) : (
+        <ul className="max-h-80 space-y-1 overflow-y-auto">
+          {accounts.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button" disabled={pick.isPending}
+                className="flex min-h-11 w-full flex-col items-start rounded-md px-3 py-2 text-left hover:bg-muted disabled:opacity-50"
+                onClick={() => pick.mutate(a)}
+              >
+                <span className="text-sm font-medium">{a.name}</span>
+                <span className="text-xs text-muted-foreground">{a.detail && a.detail.includes(a.id) ? a.detail : [a.detail, a.id].filter(Boolean).join(" · ")}</span>
+                {a.connectedTo.length > 0 && (
+                  <span className="text-xs text-amber-300">Already on {a.connectedTo.map((c) => c.clientName).join(", ")}</span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function StripeOAuthButton({ clientId }: { clientId: string }) {
+  const { toast } = useToast();
+  const start = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/clients/${clientId}/integrations/stripe/oauth-start`, { returnTo: currentPath() })).json(),
+    onSuccess: (r: { url: string }) => { window.location.href = r.url; },
+    onError: (e) => toast({ title: "Could not start Stripe login", description: errorText(e), variant: "destructive" }),
+  });
+  return (
+    <Button className="h-11 w-full sm:w-auto" onClick={() => start.mutate()} disabled={start.isPending} data-testid="button-stripe-oauth">
+      {start.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogIn className="mr-2 h-4 w-4" />}Connect with Stripe
+    </Button>
+  );
+}
+
+function ConnectLinkCard({ clientId }: { clientId: string }) {
+  const { toast } = useToast();
+  const create = useMutation({
+    mutationFn: async () => (await apiRequest("GET", `/api/clients/${clientId}/connect-link`)).json() as Promise<{ url: string; expiresAt: string }>,
+    onError: (e) => toast({ title: "Could not create the link", description: errorText(e), variant: "destructive" }),
+  });
+  return (
+    <Card className="rounded-xl">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Send the client a connect link</CardTitle>
+        <CardDescription>The client can connect Stripe and paste Whop or Fanbasis keys without logging in.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {create.data ? (
+          <>
+            <CopyField label="Connect link" value={create.data.url} />
+            <p className="text-xs text-muted-foreground">Works until {format(new Date(create.data.expiresAt), "MMM d")}.</p>
+          </>
+        ) : (
+          <Button variant="outline" className="h-11 w-full sm:w-auto" onClick={() => create.mutate()} disabled={create.isPending} data-testid="button-connect-link">
+            {create.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}Create link
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
