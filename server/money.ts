@@ -85,6 +85,17 @@ async function totals(clientId: number, from: string, to: string, tz: string) {
 export async function moneySummary(clientId: number, from: string, to: string, tz: string) {
   const prev = previousRange(from, to);
   const [current, previous] = await Promise.all([totals(clientId, from, to, tz), totals(clientId, prev.from, prev.to, tz)]);
+  // A comparison only means something when data reaches back over the whole earlier period.
+  // Right after a source is connected, only the last 30-90 days exist, and the earlier period
+  // would look empty.
+  const [coverage] = await db.select({
+    firstSale: sql<string | null>`(select min(${saleDay(tz)})::text from ${sales} where ${sales.clientId} = ${clientId})`,
+    firstSpend: sql<string | null>`(select min(${adSpendDaily.date})::text from ${adSpendDaily} where ${adSpendDaily.clientId} = ${clientId})`,
+  }).from(sql`(select 1) as one`);
+  const comparable = {
+    revenue: !!coverage?.firstSale && coverage.firstSale <= prev.from,
+    adSpend: !coverage?.firstSpend || coverage.firstSpend <= prev.from,
+  };
 
   const dailySales = await db.select({
     date: sql<string>`${saleDay(tz)}::text`,
@@ -130,6 +141,7 @@ export async function moneySummary(clientId: number, from: string, to: string, t
     currency: "USD",
     totals: current,
     previousTotals: previous,
+    comparable,
     daily: Array.from(byDay.values()),
     revenueBySource,
     spendByCampaign,

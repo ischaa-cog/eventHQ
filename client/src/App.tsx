@@ -1,3 +1,4 @@
+import React, { Component, ErrorInfo, ReactNode, Suspense, lazy } from "react";
 import { Switch, Route, Redirect, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -9,7 +10,6 @@ import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import ClientLogin from "@/pages/client-login";
 const DashboardPage = lazy(() => import("@/pages/dashboard"));
-import React, { Component, ErrorInfo, ReactNode, Suspense, lazy } from "react";
 
 const ClientsPage = lazy(() => import("@/pages/clients"));
 const ClientWorkspacePage = lazy(() => import("@/pages/client-workspace"));
@@ -30,6 +30,8 @@ import AccessDeniedPage from "@/pages/access-denied";
 const LiveSalesFeedPage = lazy(() => import("@/pages/live-sales-feed"));
 const TalkToNeoPage = lazy(() => import("@/pages/talk-to-neo"));
 const AdminPage = lazy(() => import("@/pages/admin"));
+const MoneyDashboardPage = lazy(() => import("@/pages/money-dashboard"));
+const IntegrationsPage = lazy(() => import("@/pages/integrations"));
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -204,7 +206,9 @@ function Router() {
       <Route path="/admin" component={() => <AdminOnlyFeature><AdminPage /></AdminOnlyFeature>} />
 
       {/* Client workspaces */}
-      <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
+      <Route path="/client/:id/dashboard" component={() => <ClientPortalFeature><MoneyDashboardPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/overview" component={() => <ClientPortalFeature><ClientDashboard /></ClientPortalFeature>} />
+      <Route path="/client/:id/integrations" component={() => <InternalOnlyFeature><IntegrationsPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/onboarding" component={() => <InternalOnlyFeature><ClientOnboardingPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/workspace" component={() => <InternalOnlyFeature><ClientWorkspacePage /></InternalOnlyFeature>} />
       {/* Event Builder (client/src/pages/event-builder.tsx) is hidden for now; re-add its route here to bring it back. */}
