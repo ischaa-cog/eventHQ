@@ -83,6 +83,8 @@ async function buildVercel() {
       // Everything else is a page of the single-page app.
       { src: "/(.*)", dest: "/index.html" },
     ],
+    // Daily on every Vercel plan. The dashboard also refreshes stale data when it is opened.
+    crons: [{ path: "/api/cron/sync", schedule: "0 9 * * *" }],
   }, null, 2));
 
   console.log(`done: ${OUT}`);

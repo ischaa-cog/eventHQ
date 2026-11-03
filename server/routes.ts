@@ -19,6 +19,8 @@ import { registerPortalRoutes } from "./portal-routes";
 import { registerWhopWebhook } from "./whop-webhook";
 import { activityLogger, registerActivityRoutes } from "./activity-log";
 import { registerMetaCampaignRoutes } from "./meta-campaigns";
+import { registerIntegrationRoutes } from "./integrations/routes";
+import { registerMoneyRoutes } from "./money";
 import { registerNeoKnowledgeRoutes, searchKnowledge, visibleLessonTitles, knowledgePrompt, NEO_VOICE } from "./neo-knowledge";
 import { hasFullAccess } from "@shared/roles";
 import { netSaleContribution } from "./sales-math";
@@ -207,6 +209,8 @@ export function registerApiRoutes(app: Express): void {
     { method: "GET", path: /^\/api\/clients\/\d+\/calendar\/connection\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/sales\/sources\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/portal-summary\/?$/ },
+    { method: "GET", path: /^\/api\/clients\/\d+\/money-summary\/?$/ },
+    { method: "POST", path: /^\/api\/clients\/\d+\/money-summary\/refresh\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/projections\/?$/ },
     { method: "POST", path: /^\/api\/clients\/\d+\/projections\/?$/ },
     { method: "PATCH", path: /^\/api\/projections\/\d+\/?$/ },
@@ -3014,4 +3018,6 @@ When reviewing data or stats, give specific, actionable insights. Keep responses
   registerNeoKnowledgeRoutes(app, getRequestUser);
   registerActivityRoutes(app, getRequestUser);
   registerMetaCampaignRoutes(app, getRequestUser, canAccessClient);
+  registerIntegrationRoutes(app, getRequestUser);
+  registerMoneyRoutes(app, getRequestUser);
 }

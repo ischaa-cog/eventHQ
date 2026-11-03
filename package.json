@@ -10,7 +10,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "echo \"Use npm run db:generate then npm run db:migrate. db:push skips migration history.\" && exit 1",
-    "test": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://localhost:5433/eventhq_test} tsx --env-file-if-exists=.env --test server/*.test.ts",
+    "test": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://localhost:5433/eventhq_test} tsx --env-file-if-exists=.env --test server/*.test.ts server/integrations/*.test.ts",
     "vercel-build": "tsx script/build-vercel.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env script/migrate.ts"
