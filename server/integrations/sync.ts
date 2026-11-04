@@ -47,8 +47,24 @@ function guard(deadline?: number) {
   if (deadline && Date.now() > deadline) throw new DeadlineReached();
 }
 
+// Platforms drop connections and return 5xx/429 now and then; retry those a few times before failing.
+const RETRIABLE = new Set([429, 500, 502, 503, 504]);
+async function fetchWithRetry(fetchImpl: typeof fetch, url: string, headers: Record<string, string>) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(30_000) });
+      if (!RETRIABLE.has(res.status) || attempt >= 2) return res;
+      const text = await res.clone().text();
+      if (/reduce the amount of data/i.test(text)) return res; // the caller asks for less instead
+    } catch (e) {
+      if (attempt >= 2) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+  }
+}
+
 async function getJson(fetchImpl: typeof fetch, url: string, headers: Record<string, string>, label: string) {
-  const res = await fetchImpl(url, { headers });
+  const res = await fetchWithRetry(fetchImpl, url, headers);
   const text = await res.text();
   if (!res.ok) {
     let message = text.slice(0, 300);
@@ -488,12 +504,25 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
   const secret = appSecret;
   const proof = secret ? createHmac("sha256", secret).update(accessToken).digest("hex") : null;
   const auth = { Authorization: `Bearer ${accessToken}` };
+  // Meta refuses requests it finds too large ("Please reduce the amount of data"); ask for
+  // smaller pages instead of failing the sync.
+  const tooMuch = (e: unknown) => e instanceof Error && /reduce the amount of data/i.test(e.message);
   const page = async (first: string) => {
     const out: any[] = [];
     let url: string | undefined = first;
-    for (let n = 0; url && n < 200; n++) {
+    for (let n = 0; url && n < 400; n++) {
       guard(opts.deadline);
-      const body: any = await getJson(f, url, auth, "Meta");
+      let body: any;
+      try {
+        body = await getJson(f, url, auth, "Meta");
+      } catch (e) {
+        const u: URL = new URL(url as string);
+        const limit = Number(u.searchParams.get("limit") || 500);
+        if (!tooMuch(e) || limit <= 25) throw e;
+        u.searchParams.set("limit", String(Math.max(25, Math.floor(limit / 4))));
+        url = u.toString();
+        continue;
+      }
       out.push(...(body.data ?? []));
       url = body.paging?.next;
     }
@@ -512,15 +541,25 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
   }
   const landing = new Map<string, string | null>();
   const creativeFields = "creative{object_story_spec{link_data{link,call_to_action},video_data{call_to_action},template_data{link}},asset_feed_spec{link_urls{website_url}},link_url}";
-  const landingFor = async (ids: string[]) => {
-    const missing = ids.filter((id) => !landing.has(id));
-    for (let i = 0; i < missing.length; i += 50) {
-      guard(opts.deadline);
-      const q = new URLSearchParams({ ids: missing.slice(i, i + 50).join(","), fields: `id,${creativeFields}` });
-      if (proof) q.set("appsecret_proof", proof);
+  const landingBatch = async (batch: string[]): Promise<void> => {
+    guard(opts.deadline);
+    const q = new URLSearchParams({ ids: batch.join(","), fields: `id,${creativeFields}` });
+    if (proof) q.set("appsecret_proof", proof);
+    try {
       const body = await getJson(f, `https://graph.facebook.com/v21.0/?${q}`, auth, "Meta ads");
       for (const [id, ad] of Object.entries<any>(body)) landing.set(id, adLandingUrl(ad));
+    } catch (e) {
+      if (!tooMuch(e)) throw e;
+      // Large creatives: split the batch; a single ad Meta still refuses keeps no landing page.
+      if (batch.length === 1) { landing.set(batch[0], null); return; }
+      const half = Math.ceil(batch.length / 2);
+      await landingBatch(batch.slice(0, half));
+      await landingBatch(batch.slice(half));
     }
+  };
+  const landingFor = async (ids: string[]) => {
+    const missing = ids.filter((id) => !landing.has(id));
+    for (let i = 0; i < missing.length; i += 50) await landingBatch(missing.slice(i, i + 50));
   };
   const fetchWindow = async ([from, to]: [string, string]) => {
     const insightParams = new URLSearchParams({
@@ -672,7 +711,8 @@ export async function syncConnection(connection: IntegrationConnection, opts: Sy
 export async function syncStale(opts: { clientId?: number; staleMinutes?: number; budgetMs?: number } = {}) {
   const cutoff = new Date(Date.now() - (opts.staleMinutes ?? 60) * 60_000);
   const deadline = Date.now() + (opts.budgetMs ?? 45_000);
-  const rows = await db.select().from(integrationConnections).where(eq(integrationConnections.status, "active"));
+  // Connections whose last sync failed are retried too, so a one-off error does not stop them for good.
+  const rows = await db.select().from(integrationConnections).where(inArray(integrationConnections.status, ["active", "error"]));
   const due = rows
     .filter((r) => (opts.clientId ? r.clientId === opts.clientId : true))
     .filter((r) => !r.lastSyncAt || r.lastSyncAt < cutoff)

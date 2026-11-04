@@ -4,7 +4,7 @@
 // falls back to the numbers typed into Event Tracker, and says so.
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { adSpendDaily, eventPerformance, integrationConnections, sales, type User } from "@shared/schema";
 import { db } from "./storage";
 import { isAuthenticated } from "./auth";
@@ -249,7 +249,8 @@ export function registerMoneyRoutes(app: Express, getRequestUser: GetUser) {
     try {
       // On Vercel each connection syncs in its own function call, in parallel, so every account
       // gets a full time budget. Locally (or if fan-out fails) they run here one after another.
-      const due = (await db.select().from(integrationConnections).where(eq(integrationConnections.status, "active")))
+      // Failed connections are retried too, so a one-off error does not stop them for good.
+      const due = (await db.select().from(integrationConnections).where(inArray(integrationConnections.status, ["active", "error"])))
         .filter((c) => !c.lastSyncAt || c.lastSyncAt.getTime() < Date.now() - 30 * 60_000);
       if (process.env.VERCEL && due.length > 1) {
         const results = await Promise.allSettled(due.map((c) => fetch(`${appUrl()}/api/cron/sync-one/${c.id}?t=${internalToken(c.id)}`)
@@ -272,7 +273,7 @@ export function registerMoneyRoutes(app: Express, getRequestUser: GetUser) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const [row] = await db.select().from(integrationConnections).where(eq(integrationConnections.id, id));
-    if (!row || row.status !== "active") return res.status(404).json({ error: "Not found" });
+    if (!row || row.status === "disabled") return res.status(404).json({ error: "Not found" });
     try {
       const result = await syncConnection(row, { deadline: Date.now() + 50_000 });
       // A long first sync stops at the time limit; carry on in a fresh call.
