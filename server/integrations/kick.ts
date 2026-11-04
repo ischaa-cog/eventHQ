@@ -18,7 +18,7 @@ export async function kickSync(connectionId: number, hop = 0): Promise<void> {
     void (async () => {
       for (let n = hop; n < MAX_HOPS; n++) {
         const row = await getConnection(connectionId);
-        if (!row || row.status !== "active") return;
+        if (!row || row.status === "disabled") return;
         const result = await syncConnection(row, { deadline: Date.now() + 50_000 });
         if (result.complete) return;
       }
