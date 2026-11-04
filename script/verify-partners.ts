@@ -91,13 +91,13 @@ async function main() {
       if (liveConn.lastError) console.log(`     ${label}: live sync error: ${liveConn.lastError}`);
       try {
         // Reference sync, with no time limit, resuming until complete.
-        let row = await saveConnection({ clientId: refClient.id, provider: p.provider as any, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials });
+        let row = await saveConnection({ clientId: refClient.id, provider: p.provider as any, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials, ...(p.settings ? { settings: p.settings } : {}) });
         let r = await syncConnection(row, { days: days + 4 });
         while (!r.complete) { row = (await getConnection(row.id))!; r = await syncConnection(row, { days: days + 4 }); }
         const ref = await refRecords(row.id);
         const got: Records = await api("GET", `/api/clients/${client.id}/integrations/${liveConn.id}/records?from=${wideFrom}&to=${wideTo}`);
         const cmp = compare(ref, got, inWindow, from, to);
-        if (p.provider === "meta") cmp.metaAccountTotal = await metaAccountSpend(p.externalAccountId);
+        if (p.provider === "meta" && !p.settings) cmp.metaAccountTotal = await metaAccountSpend(p.externalAccountId);
         const ok = cmp.missing.length === 0 && cmp.extra.length === 0 && cmp.changed.length === 0 && cmp.spendDays.length === 0 && cmp.optInsMissing === 0 && cmp.optInsExtra === 0
           && (cmp.metaAccountTotal === undefined || Math.abs(cmp.metaAccountTotal - cmp.liveSpend) < 0.01);
         if (!ok) problems++;

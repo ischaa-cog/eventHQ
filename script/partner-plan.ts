@@ -6,7 +6,8 @@ import { homedir } from "os";
 export type Mapping = {
   match: string;
   code?: string;
-  meta?: string[];
+  // An ad account id, or { id, domains } for a shared account: only ads to those sites count.
+  meta?: Array<string | { id: string; domains: string[] }>;
   whop?: string;
   stripe?: Array<{ label: string; key: string }>;
   fanbasis?: string;
@@ -27,7 +28,7 @@ export function readEnv(path: string): Record<string, string> {
   return out;
 }
 
-export type Planned = { partner: string; provider: string; externalAccountId: string; displayName: string; credentials: Record<string, string> };
+export type Planned = { partner: string; provider: string; externalAccountId: string; displayName: string; credentials: Record<string, string>; settings?: Record<string, unknown> };
 
 export function loadPlan() {
   const envPath = expand(value("env") ?? "~/adflow-dashboard/.env");
@@ -41,10 +42,13 @@ export function loadPlan() {
   const planned: Planned[] = [];
   const problems: string[] = [];
   for (const m of mappings) {
-    for (const account of m.meta ?? []) {
+    for (const entry of m.meta ?? []) {
+      const account = (typeof entry === "string" ? entry : entry.id).replace(/^act_/, "");
+      const domains = typeof entry === "string" ? null : entry.domains;
       if (!env.META_ACCESS_TOKEN) problems.push(`${m.match}: META_ACCESS_TOKEN missing`);
-      else planned.push({ partner: m.match, provider: "meta", externalAccountId: account.replace(/^act_/, ""), displayName: `Meta ${account}`,
-        credentials: { accessToken: env.META_ACCESS_TOKEN, ...(env.META_APP_SECRET ? { appSecret: env.META_APP_SECRET } : {}) } });
+      else planned.push({ partner: m.match, provider: "meta", externalAccountId: account, displayName: `Meta ${account}${domains ? " (shared)" : ""}`,
+        credentials: { accessToken: env.META_ACCESS_TOKEN, ...(env.META_APP_SECRET ? { appSecret: env.META_APP_SECRET } : {}) },
+        ...(domains ? { settings: { pageDomains: domains } } : {}) });
     }
     if (m.whop) {
       const k = need(m.whop);

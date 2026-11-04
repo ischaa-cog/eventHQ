@@ -480,6 +480,20 @@ export function metaSpendRows(rows: any[], landing: Map<string, string | null> =
 }
 
 // Where an ad sends people, from its creative. Lead-form ads have no page and come back null.
+// settings.pageDomains: ["aibusinesssummit.com", ...]. A landing page counts when its host is one
+// of these or a subdomain of one. Ads with no landing page are left out once a filter is set.
+export function siteFilter(settings: unknown): ((url: string | null) => boolean) | null {
+  const list = (settings as any)?.pageDomains;
+  if (!Array.isArray(list) || !list.length) return null;
+  const domains = list.map((d: unknown) => String(d).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")).filter(Boolean);
+  return (url) => {
+    if (!url) return false;
+    let host: string;
+    try { host = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.toLowerCase().replace(/^www\./, ""); } catch { return false; }
+    return domains.some((d: string) => host === d || host.endsWith(`.${d}`));
+  };
+}
+
 export function adLandingUrl(ad: any): string | null {
   const c = ad?.creative ?? {};
   const oss = c.object_story_spec ?? {};
@@ -573,11 +587,20 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
     if (proof) insightParams.set("appsecret_proof", proof);
     return page(`https://graph.facebook.com/v21.0/act_${accountId}/insights?${insightParams}`);
   };
+  // Shared ad accounts (one account running ads for several clients): settings.pageDomains keeps
+  // only ads that send people to this client's websites. Rows saved before the filter was set,
+  // or for other sites, are removed so they are not counted here.
+  const keep = siteFilter(connection.settings);
+  if (keep) {
+    const stored = await db.select({ id: adSpendDaily.id, url: adSpendDaily.landingUrl }).from(adSpendDaily).where(eq(adSpendDaily.connectionId, connection.id));
+    const drop = stored.filter((r) => !keep(r.url)).map((r) => r.id);
+    for (let i = 0; i < drop.length; i += 1000) await db.delete(adSpendDaily).where(inArray(adSpendDaily.id, drop.slice(i, i + 1000)));
+  }
   let saved = 0;
   for (let i = 0; i < windows.length; i += 4) {
     const raw = (await Promise.all(windows.slice(i, i + 4).map(fetchWindow))).flat();
     await landingFor(Array.from(new Set(raw.map((r) => String(r.ad_id)).filter(Boolean))));
-    const rows = metaSpendRows(raw, landing).map((r) => ({
+    const rows = metaSpendRows(raw, landing).filter((r) => !keep || keep(r.landingUrl)).map((r) => ({
       ...r,
       spend: r.spend.toFixed(2),
       purchaseValue: r.purchaseValue.toFixed(2),
