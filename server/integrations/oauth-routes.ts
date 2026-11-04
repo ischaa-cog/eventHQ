@@ -162,7 +162,11 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
 
   app.post("/api/clients/:clientId/integrations/from-grant", isAuthenticated, async (req, res) => {
     if (!await requireAdmin(req, res)) return;
-    const parsed = z.object({ grantId: z.number().int(), accountId: z.string().trim().min(1).max(200), accountName: z.string().trim().max(200).optional() }).safeParse(req.body);
+    const parsed = z.object({
+      grantId: z.number().int(), accountId: z.string().trim().min(1).max(200), accountName: z.string().trim().max(200).optional(),
+      // e.g. { pageDomains: [...] } for a shared ad account; saved before the first sync starts.
+      settings: z.record(z.unknown()).optional(),
+    }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Pick an account." });
     const grant = await getGrant(parsed.data.grantId);
     if (!grant) return res.status(404).json({ error: "Login not found" });
@@ -173,6 +177,7 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
       const row = await saveConnection({
         clientId: Number(req.params.clientId), provider: grant.provider as "meta" | "highlevel",
         externalAccountId: account.id, displayName: parsed.data.accountName || account.name, credentials: {}, grantId: grant.id,
+        ...(parsed.data.settings ? { settings: parsed.data.settings } : {}),
       });
       await kickSync(row.id);
       res.json({ ...toPublic(row), webhookUrl: webhookUrlFor(row.provider, row.id) });
