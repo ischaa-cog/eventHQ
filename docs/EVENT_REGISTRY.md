@@ -29,6 +29,7 @@ Nothing is matched by guessing from names.
 | Plan installments | A later payment of the same product by a buyer who bought it during the event stays with that event |
 | Refunds | Follow their original payment |
 | Overlaps | Go to the event with the latest Cart Open on or before the date, and are flagged as conflicts |
+| Anything else inside an event's dates (loose mode) | Counts toward that event, marked "by date only", so no revenue is missed while lists are incomplete. On by default; each client can turn it off in settings for exact numbers |
 
 URLs are compared after removing `https://`, `www.`, query strings (UTMs), `#` fragments and trailing slashes. Every sync and every registry change re-runs the matcher for that workspace.
 

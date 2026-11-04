@@ -78,7 +78,7 @@ export default function EventRegistryPage() {
             <Button className="h-11" onClick={() => setEditing("new")} data-testid="button-add-event"><Plus className="mr-2 h-4 w-4" />Add event</Button>
             <Button asChild variant="outline" className="h-11">
               <Link href={`/client/${clientId}/registry/unmatched`}>
-                Unmatched{unmatchedTotal ? ` (${unmatchedTotal})` : ""}{data?.unmatched.conflicts ? ` · ${data.unmatched.conflicts} conflicts` : ""}
+                Unmatched{unmatchedTotal ? ` (${unmatchedTotal})` : ""}{data?.unmatched.conflicts ? ` · ${data.unmatched.conflicts} conflicts` : ""}{data?.unmatched.byDate ? ` · ${data.unmatched.byDate} by date` : ""}
               </Link>
             </Button>
           </div>
@@ -274,13 +274,14 @@ function SettingsSheet({ clientId, data, open, onClose }: { clientId: string; da
     followUpDays: String(data.settings.dateRules?.followUpDays ?? 30),
     adsLookbackDays: String(data.settings.dateRules?.adsLookbackDays ?? 60),
   });
+  const [loose, setLoose] = useState(data.settings.dateRules?.countAllInWindow ?? true);
   const { data: suggestions } = useQuery<Suggestions>({ queryKey: [`/api/clients/${clientId}/registry/suggestions`], enabled: open });
   const productOptions = useMemo(() => (suggestions?.products ?? []).map((p) => ({ value: p.name, hint: `${p.source} · ${p.orders} sales` })), [suggestions]);
   const save = useMutation({
     mutationFn: async () => (await apiRequest("PUT", `/api/clients/${clientId}/registry/settings`, {
       eventCode: code.trim() || null, defaultProducts: defaults,
       contractValues: values.filter((v) => v.productName.trim() && Number(v.fullValue) > 0),
-      dateRules: { cartDays: Number(rules.cartDays) || 0, followUpDays: Number(rules.followUpDays) || 0, adsLookbackDays: Number(rules.adsLookbackDays) || 60 },
+      dateRules: { cartDays: Number(rules.cartDays) || 0, followUpDays: Number(rules.followUpDays) || 0, adsLookbackDays: Number(rules.adsLookbackDays) || 60, countAllInWindow: loose },
     })).json(),
     onSuccess: () => { invalidateRegistry(queryClient, clientId); toast({ title: "Saved" }); onClose(); },
     onError: (e) => toast({ title: "Could not save", description: errorText(e), variant: "destructive" }),
@@ -308,6 +309,15 @@ function SettingsSheet({ clientId, data, open, onClose }: { clientId: string; da
               <CardDescription>What "Fill dates from ads" uses for this client's events.</CardDescription>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="col-span-full flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+                <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-primary" checked={loose} onChange={(e) => setLoose(e.target.checked)} data-testid="toggle-count-all" />
+                <span className="text-sm">
+                  <span className="font-medium">Count everything in an event's dates</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Sales, ad spend and opt-ins inside an event's dates count toward it even when the product or page is not listed yet. Turn off once the lists are complete for exact numbers.
+                  </span>
+                </span>
+              </label>
               {([
                 ["cartDays", "Cart stays open", "days after the event"],
                 ["followUpDays", "Sales team follow-up", "days after cart close"],

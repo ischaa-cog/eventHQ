@@ -16,7 +16,8 @@ test("date rules: ads start opens the cart, cart closes a week after, follow-up 
   assert.deepEqual(datesFromRules({ eventStart: "2026-10-08", eventEnd: null, span: none }, rulesOf({ cartDays: 5, followUpDays: 14 })), {
     adsStart: null, cartOpen: "2026-10-08", cartClose: "2026-10-13", postCartEnd: "2026-10-27",
   });
-  assert.deepEqual(rulesOf({ cartDays: "999", followUpDays: -4, adsLookbackDays: "x" }), { cartDays: 60, followUpDays: 0, adsLookbackDays: 60 });
+  assert.deepEqual(rulesOf({ cartDays: "999", followUpDays: -4, adsLookbackDays: "x" }), { cartDays: 60, followUpDays: 0, adsLookbackDays: 60, countAllInWindow: true });
+  assert.equal(rulesOf({ countAllInWindow: false }).countAllInWindow, false);
   assert.equal(addDays("2026-12-30", 3), "2027-01-02");
 });
 

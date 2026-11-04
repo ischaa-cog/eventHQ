@@ -50,6 +50,7 @@ const settingsSchema = z.object({
     cartDays: z.coerce.number().int().min(0).max(60),
     followUpDays: z.coerce.number().int().min(0).max(365),
     adsLookbackDays: z.coerce.number().int().min(7).max(180),
+    countAllInWindow: z.boolean(),
   }).partial().optional(),
 });
 
@@ -131,6 +132,7 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
       sales: sql<string>`(select count(distinct (${sales.source}, ${sales.productName})) from ${sales} where ${sales.clientId} = ${clientId} and ${sales.matchStatus} = 'unmatched')`,
       spend: sql<string>`(select count(distinct (coalesce(${adSpendDaily.landingUrl}, ''), ${adSpendDaily.campaignId})) from ${adSpendDaily} where ${adSpendDaily.clientId} = ${clientId} and ${adSpendDaily.matchStatus} = 'unmatched' and ${adSpendDaily.spend} > 0)`,
       optIns: sql<string>`(select count(distinct coalesce(${optIns.pageUrl}, '')) from ${optIns} where ${optIns.clientId} = ${clientId} and ${optIns.matchStatus} = 'unmatched')`,
+      byDate: sql<string>`(select count(distinct (${sales.source}, ${sales.productName})) from ${sales} where ${sales.clientId} = ${clientId} and ${sales.matchStatus} = 'window')`,
       conflicts: sql<string>`(select count(*) from ${sales} where ${sales.clientId} = ${clientId} and ${sales.matchStatus} = 'conflict')
         + (select count(*) from ${adSpendDaily} where ${adSpendDaily.clientId} = ${clientId} and ${adSpendDaily.matchStatus} = 'conflict')
         + (select count(*) from ${optIns} where ${optIns.clientId} = ${clientId} and ${optIns.matchStatus} = 'conflict')`,
@@ -297,7 +299,7 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
   app.get("/api/clients/:clientId/registry/unmatched", isAuthenticated, async (req, res) => {
     if (!await staffOnly(req, res)) return;
     const clientId = clientIdOf(req);
-    const status = req.query.status === "conflict" ? "conflict" : "unmatched";
+    const status = req.query.status === "conflict" ? "conflict" : req.query.status === "window" ? "window" : "unmatched";
     const salesGroups = await db.select({
       name: sales.productName, source: sales.source, note: sql<string>`max(${sales.matchNote})`,
       count: sql<string>`count(*)`, amount: sql<string>`sum(case when ${sales.status} = 'refunded' then 0 else ${sales.amount} end)`,

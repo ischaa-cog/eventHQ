@@ -24,6 +24,7 @@ export type Numbers = {
   adSpend: number; impressions: number; clicks: number; cpm: number | null; cpc: number | null; adLeads: number;
   optIns: number; optInRate: number | null; costPerOptIn: number | null;
   tiers: Record<Tier, { count: number; revenue: number }>;
+  byDate?: { count: number; revenue: number };
   offers: Array<{ id: number; name: string; share: number; count: number; revenue: number; ourRevenue: number }>;
   contracted: number; collected: number; refunds: number; netRevenue: number; roas: number | null;
   cartOpenRevenue: number; postCartRevenue: number; buyers: number; orders: number;
@@ -41,7 +42,7 @@ export type RegistryData = {
     dateRules?: DateRules;
   };
   events: RegistryEventRow[]; reports: Report[]; problems: Problem[];
-  unmatched: { sales: number; spend: number; optIns: number; conflicts: number };
+  unmatched: { sales: number; spend: number; optIns: number; conflicts: number; byDate?: number };
 };
 export type Suggestions = {
   products: Array<{ name: string; source: string; orders: number; lastSale: string }>;
@@ -108,7 +109,7 @@ export function ListInput({ label, values, onChange, suggestions = [], placehold
   );
 }
 
-export type DateRules = { cartDays: number; followUpDays: number; adsLookbackDays: number };
+export type DateRules = { cartDays: number; followUpDays: number; adsLookbackDays: number; countAllInWindow: boolean };
 
 export type EventFormValue = {
   title: string; eventType: string; funnelRole: "main" | "mini"; feedsIntoId: number | null;
