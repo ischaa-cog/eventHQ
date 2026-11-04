@@ -233,14 +233,17 @@ async function syncFanbasis(connection: IntegrationConnection, since: Date, opts
   if (!apiKey) throw new Error("Fanbasis API key missing");
   const f = opts.fetchImpl ?? fetch;
   const transactions: any[] = [];
-  for (let page = 1; page <= 200; page++) {
+  // Fanbasis lists refunds under their sale, newest sales first. Keep paging 180 days past the
+  // window so a refund made today on an older sale is still found.
+  const refundHorizon = new Date(since.getTime() - 180 * DAY_MS);
+  for (let page = 1; page <= 500; page++) {
     guard(opts.deadline);
     const body = await getJson(f, `https://www.fanbasis.com/public-api/checkout-sessions/transactions?per_page=100&page=${page}`,
       { "x-api-key": apiKey, Accept: "application/json" }, "Fanbasis transactions");
     const rows: any[] = body.data?.transactions ?? [];
     transactions.push(...rows);
     const oldest = rows[rows.length - 1]?.transaction_date;
-    if (!body.data?.pagination?.has_more || !rows.length || (oldest && new Date(oldest) < since)) break;
+    if (!body.data?.pagination?.has_more || !rows.length || (oldest && new Date(oldest) < refundHorizon)) break;
   }
   // Refunds on older sales still count on the day they happened.
   const inWindow = transactions.filter((t) => new Date(t.transaction_date) >= since ||
