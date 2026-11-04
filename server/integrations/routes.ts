@@ -3,8 +3,8 @@
 // the admin-only check. Secrets are accepted here but never returned.
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { INTEGRATION_PROVIDERS, integrationConnections, type User } from "@shared/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { INTEGRATION_PROVIDERS, adSpendDaily, integrationConnections, optIns, sales, type User } from "@shared/schema";
 import { db } from "../storage";
 import { isAuthenticated } from "../auth";
 import { appUrl } from "../config";
@@ -66,6 +66,31 @@ export function registerIntegrationRoutes(app: Express, getRequestUser: GetUser)
       .returning({ id: integrationConnections.id });
     if (!deleted.length) return res.status(404).json({ error: "Connection not found" });
     res.json({ success: true });
+  });
+
+  // Every record a connection stored for a date range (UTC days), for checking eventHQ against the
+  // platform's own data (script/verify-partners.ts). Ids and amounts only; no customer details.
+  app.get("/api/clients/:clientId/integrations/:id/records", isAuthenticated, async (req, res) => {
+    if (!await requireAdmin(req, res)) return;
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    const from = String(req.query.from ?? ""), to = String(req.query.to ?? "");
+    if (!day.test(from) || !day.test(to)) return res.status(400).json({ error: "from and to must be YYYY-MM-DD" });
+    const rows = await listConnections(clientIdOf(req));
+    const row = rows.find((r) => r.id === Number(req.params.id));
+    if (!row) return res.status(404).json({ error: "Connection not found" });
+    const salesRows = await db.select({ key: sales.dedupeKey, amount: sales.amount, status: sales.status, at: sales.saleDate })
+      .from(sales).where(and(eq(sales.connectionId, row.id), sql`${sales.saleDate} >= ${from}::timestamp and ${sales.saleDate} < (${to}::date + 1)::timestamp`));
+    const spendRows = await db.select({ date: sql<string>`${adSpendDaily.date}::text`, spend: sql<string>`sum(${adSpendDaily.spend})`, rows: sql<string>`count(*)` })
+      .from(adSpendDaily).where(and(eq(adSpendDaily.connectionId, row.id), sql`${adSpendDaily.date} between ${from}::date and ${to}::date`))
+      .groupBy(sql`1`);
+    const optRows = await db.select({ id: optIns.externalId, at: optIns.submittedAt })
+      .from(optIns).where(and(eq(optIns.connectionId, row.id), sql`${optIns.submittedAt} >= ${from}::timestamptz and ${optIns.submittedAt} < (${to}::date + 1)::timestamptz`));
+    res.json({
+      connection: { id: row.id, provider: row.provider, externalAccountId: row.externalAccountId, lastSyncAt: row.lastSyncAt, lastError: row.lastError },
+      sales: salesRows.map((r) => [r.key, Number(r.amount), r.status, r.at.toISOString()]),
+      spendByDay: Object.fromEntries(spendRows.map((r) => [r.date, Math.round(Number(r.spend) * 100) / 100])),
+      optIns: optRows.map((r) => [r.id, r.at.toISOString()]),
+    });
   });
 
   app.post("/api/clients/:clientId/integrations/:id/sync", isAuthenticated, async (req, res) => {

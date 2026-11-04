@@ -22,67 +22,12 @@
 //   "highlevel": { "locationId": "Fk0B...", "key": "GHL_API_ALICIA" } }, ...]
 // "match" is part of the workspace name in eventHQ (case-insensitive); it must match exactly one.
 // Optional "code" sets the workspace's client code for Event IDs (e.g. "AL" gives AL-2610-MAIN).
-import { readFileSync } from "fs";
-import { homedir } from "os";
+import { apiSession } from "./api-session";
 
-type Mapping = {
-  match: string;
-  code?: string;
-  meta?: string[];
-  whop?: string;
-  stripe?: Array<{ label: string; key: string }>;
-  fanbasis?: string;
-  highlevel?: { locationId: string; key: string };
-};
+import { flag, loadPlan, value } from "./partner-plan";
 
-const args = process.argv.slice(2);
-const flag = (name: string) => args.includes(`--${name}`);
-const value = (name: string) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : undefined; };
-const expand = (p: string) => p.replace(/^~(?=\/)/, homedir());
-
-const envPath = expand(value("env") ?? "~/adflow-dashboard/.env");
-const mapPath = expand(value("map") ?? "partners.local.json");
-
-function readEnv(path: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-  return out;
-}
-
-const env = readEnv(envPath);
-const mappings: Mapping[] = JSON.parse(readFileSync(mapPath, "utf8"));
-const need = (name: string | undefined) => (name ? env[name] || undefined : undefined);
-
-type Planned = { partner: string; provider: string; externalAccountId: string; displayName: string; credentials: Record<string, string> };
-const planned: Planned[] = [];
-const problems: string[] = [];
-for (const m of mappings) {
-  for (const account of m.meta ?? []) {
-    if (!env.META_ACCESS_TOKEN) problems.push(`${m.match}: META_ACCESS_TOKEN missing`);
-    else planned.push({ partner: m.match, provider: "meta", externalAccountId: account.replace(/^act_/, ""), displayName: `Meta ${account}`,
-      credentials: { accessToken: env.META_ACCESS_TOKEN, ...(env.META_APP_SECRET ? { appSecret: env.META_APP_SECRET } : {}) } });
-  }
-  if (m.whop) {
-    const k = need(m.whop);
-    if (!k) problems.push(`${m.match}: ${m.whop} missing`); else planned.push({ partner: m.match, provider: "whop", externalAccountId: "", displayName: "Whop", credentials: { apiKey: k } });
-  }
-  for (const s of m.stripe ?? []) {
-    const k = need(s.key);
-    if (!k) problems.push(`${m.match}: ${s.key} missing`); else planned.push({ partner: m.match, provider: "stripe", externalAccountId: s.label, displayName: `Stripe · ${s.label}`, credentials: { secretKey: k } });
-  }
-  if (m.fanbasis) {
-    const k = need(m.fanbasis);
-    if (!k) problems.push(`${m.match}: ${m.fanbasis} missing`); else planned.push({ partner: m.match, provider: "fanbasis", externalAccountId: "", displayName: "Fanbasis", credentials: { apiKey: k } });
-  }
-  if (m.highlevel) {
-    const k = need(m.highlevel.key);
-    if (!k || !m.highlevel.locationId) problems.push(`${m.match}: HighLevel key or location missing`);
-    else planned.push({ partner: m.match, provider: "highlevel", externalAccountId: m.highlevel.locationId, displayName: "HighLevel opt-ins", credentials: { apiKey: k } });
-  }
-}
+const { env, mappings, planned, problems } = loadPlan();
+type Planned = (typeof planned)[number];
 
 // One cheap read-only call per account, to prove the key works before anything is stored.
 async function check(p: Planned): Promise<string> {
@@ -147,25 +92,10 @@ async function main() {
 
 // ---------- Through the live app's API ----------
 
-async function ask(question: string, hidden = false): Promise<string> {
-  const readline = await import("readline");
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-  if (hidden) {
-    const out = (rl as any).output;
-    (rl as any)._writeToOutput = (text: string) => { out.write(text.startsWith(question) ? question : text.includes("\n") ? "\n" : "*"); };
-  }
-  return new Promise((resolve) => rl.question(question, (answer) => { rl.close(); if (hidden) process.stdout.write("\n"); resolve(answer.trim()); }));
-}
-
 async function viaApi(base: string) {
   base = base.replace(/\/+$/, "");
   if (!/^https?:\/\//.test(base)) throw new Error("--api needs the full address, like https://app.example.com");
-  const email = process.env.EVENTHQ_EMAIL || await ask("eventHQ admin email: ");
-  const password = process.env.EVENTHQ_PASSWORD || await ask("Password: ", true);
-  const login = await fetch(`${base}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, portal: "admin" }) });
-  if (!login.ok) throw new Error(`Login failed (${login.status}): ${(await login.text()).slice(0, 200)}`);
-  const cookies = ((login.headers as any).getSetCookie?.() ?? [login.headers.get("set-cookie") ?? ""]) as string[];
-  const cookie = cookies.map((c) => c.split(";")[0]).filter(Boolean).join("; ");
+  const cookie = await apiSession(base);
   const api = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method, headers: { Cookie: cookie, "Content-Type": "application/json", Accept: "application/json" },
