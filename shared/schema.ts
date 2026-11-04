@@ -96,6 +96,8 @@ export const clients = pgTable("clients", {
   // sells at most events, by tier. Events use these unless they list their own.
   eventCode: text("event_code"),
   defaultProducts: jsonb("default_products"), // { vip: string[], platinum: string[], mainOffer: string[], postCart: string[] }
+  // How "Fill dates from ads" sets an event's windows: { cartDays, followUpDays, adsLookbackDays }.
+  registryDateRules: jsonb("registry_date_rules"),
   onboardingComplete: boolean("onboarding_complete").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

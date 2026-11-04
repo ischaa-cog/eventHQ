@@ -1,6 +1,6 @@
 // Shared pieces for the Event Registry screens: types, formatting, the list-of-values input,
 // and the event form.
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,10 @@ export type Report = {
 };
 export type Problem = { eventId: number | null; level: "error" | "warning"; message: string };
 export type RegistryData = {
-  settings: { eventCode: string | null; defaultProducts: TierProducts; contractValues: Array<{ productName: string; fullValue: string }> };
+  settings: {
+    eventCode: string | null; defaultProducts: TierProducts; contractValues: Array<{ productName: string; fullValue: string }>;
+    dateRules?: DateRules;
+  };
   events: RegistryEventRow[]; reports: Report[]; problems: Problem[];
   unmatched: { sales: number; spend: number; optIns: number; conflicts: number };
 };
@@ -105,6 +108,8 @@ export function ListInput({ label, values, onChange, suggestions = [], placehold
   );
 }
 
+export type DateRules = { cartDays: number; followUpDays: number; adsLookbackDays: number };
+
 export type EventFormValue = {
   title: string; eventType: string; funnelRole: "main" | "mini"; feedsIntoId: number | null;
   adsStart: string; eventStart: string; eventEnd: string; cartOpen: string; cartClose: string; postCartEnd: string;
@@ -133,14 +138,15 @@ const DATE_FIELDS: Array<[keyof EventFormValue, string, string]> = [
   ["adsStart", "Ads start", "Spend and opt-ins count from here"],
   ["eventStart", "Event start", "Required"],
   ["eventEnd", "Event end", ""],
-  ["cartOpen", "Cart open", "Sales count from here"],
-  ["cartClose", "Cart close", "Spend and opt-ins count until here"],
-  ["postCartEnd", "Post-cart end", "Sales count until here"],
+  ["cartOpen", "Cart open", "Sales count from here, including ticket sales while ads run"],
+  ["cartClose", "Cart close", "End of the open/close cart sequence"],
+  ["postCartEnd", "Post-cart end", "Sales team follow-up counts until here"],
 ];
 
-export function EventForm({ value, onChange, mains, suggestions, defaults }: {
+export function EventForm({ value, onChange, mains, suggestions, defaults, afterPages }: {
   value: EventFormValue; onChange: (v: EventFormValue) => void; mains: RegistryEventRow[];
   suggestions?: Suggestions; defaults: TierProducts;
+  afterPages?: ReactNode; // e.g. "Fill dates from ads", which needs the page links
 }) {
   const set = <K extends keyof EventFormValue>(k: K, v: EventFormValue[K]) => onChange({ ...value, [k]: v });
   const productOptions = (suggestions?.products ?? []).map((p) => ({ value: p.name, hint: `${p.source} · ${p.orders} sales` }));
@@ -204,6 +210,7 @@ export function EventForm({ value, onChange, mains, suggestions, defaults }: {
         suggestions={pageOptions} placeholder="yourclient.com/masterclass" testId="input-page-link"
         help="Ad spend and opt-ins match these pages. UTMs, https:// and www. are ignored."
       />
+      {afterPages}
       <div className="space-y-4 rounded-lg border border-border p-3">
         <p className="text-sm font-medium">Products sold at this event</p>
         <p className="-mt-3 text-xs text-muted-foreground">Leave a box empty to use the client's usual product. Names must match the payment platform exactly.</p>
