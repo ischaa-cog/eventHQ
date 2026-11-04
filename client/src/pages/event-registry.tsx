@@ -150,7 +150,7 @@ function MainCard({ main, minis, reports, clientId }: { main: RegistryEventRow; 
               <span className="text-xs text-muted-foreground">{main.registryId}</span>
             </div>
             <p className="mt-1 truncate font-medium">{main.title}</p>
-            <p className="text-xs text-muted-foreground">Cart {shortDate(main.cartOpen)} – {shortDate(main.cartClose)} · post-cart to {shortDate(main.postCartEnd)}</p>
+            <p className="text-xs text-muted-foreground">Cart {shortDate(main.cartOpen)} – {shortDate(main.cartClose)} · follow-up to {shortDate(main.postCartEnd)}</p>
           </div>
           <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
         </div>
@@ -214,15 +214,38 @@ export function EventSheet({ clientId, data, editing, onClose }: {
     onSuccess: () => { invalidateRegistry(queryClient, clientId); onClose(); },
   });
   const ready = value.title.trim() && value.eventStart;
+  const [fillNote, setFillNote] = useState<string | null>(null);
+  const fill = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/clients/${clientId}/registry/suggest-dates`, {
+      eventStart: value.eventStart, eventEnd: value.eventEnd || null, pageLinks: value.pageLinks, adCampaignIds: value.adCampaignIds,
+    })).json(),
+    onSuccess: (r: FilledDates) => {
+      setValue({ ...value, adsStart: r.adsStart ?? value.adsStart, cartOpen: r.cartOpen, cartClose: r.cartClose, postCartEnd: r.postCartEnd });
+      setFillNote(fillText(r));
+    },
+    onError: (e) => toast({ title: "Could not fill dates", description: errorText(e), variant: "destructive" }),
+  });
+  const fillButton = (
+    <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+      <Button type="button" variant="outline" className="h-11 w-full" disabled={!value.eventStart || fill.isPending} onClick={() => fill.mutate()}>
+        {fill.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Fill dates from ads
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        {fillNote ?? (value.eventStart
+          ? "Uses the event dates and page links above: ads start when they began spending, the cart closes a week after the event, and the sales team's follow-up counts for a month after that. Check before saving."
+          : "Add the event start date and page links first.")}
+      </p>
+    </div>
+  );
   return (
-    <Sheet open={!!editing} onOpenChange={(o) => !o && onClose()}>
+    <Sheet open={!!editing} onOpenChange={(o) => { if (!o) { setFillNote(null); onClose(); } }}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-lg">
         <SheetHeader className="border-b border-border p-4 text-left">
           <SheetTitle>{editing === "new" ? "Add event" : `Edit ${(editing as RegistryEventRow | null)?.registryId ?? "event"}`}</SheetTitle>
           <SheetDescription>Dates, page links and products decide which ads, opt-ins and sales count.</SheetDescription>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto p-4">
-          <EventForm value={value} onChange={setValue} mains={mains} suggestions={suggestions} defaults={data.settings.defaultProducts} />
+          <EventForm value={value} onChange={setValue} mains={mains} suggestions={suggestions} defaults={data.settings.defaultProducts} afterPages={fillButton} />
         </div>
         <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-row">
           {editing && editing !== "new" && (
@@ -246,12 +269,18 @@ function SettingsSheet({ clientId, data, open, onClose }: { clientId: string; da
   const [code, setCode] = useState(data.settings.eventCode ?? "");
   const [defaults, setDefaults] = useState<TierProducts>(data.settings.defaultProducts ?? {});
   const [values, setValues] = useState(data.settings.contractValues.map((c) => ({ productName: c.productName, fullValue: String(Number(c.fullValue)) })));
+  const [rules, setRules] = useState({
+    cartDays: String(data.settings.dateRules?.cartDays ?? 7),
+    followUpDays: String(data.settings.dateRules?.followUpDays ?? 30),
+    adsLookbackDays: String(data.settings.dateRules?.adsLookbackDays ?? 60),
+  });
   const { data: suggestions } = useQuery<Suggestions>({ queryKey: [`/api/clients/${clientId}/registry/suggestions`], enabled: open });
   const productOptions = useMemo(() => (suggestions?.products ?? []).map((p) => ({ value: p.name, hint: `${p.source} · ${p.orders} sales` })), [suggestions]);
   const save = useMutation({
     mutationFn: async () => (await apiRequest("PUT", `/api/clients/${clientId}/registry/settings`, {
       eventCode: code.trim() || null, defaultProducts: defaults,
       contractValues: values.filter((v) => v.productName.trim() && Number(v.fullValue) > 0),
+      dateRules: { cartDays: Number(rules.cartDays) || 0, followUpDays: Number(rules.followUpDays) || 0, adsLookbackDays: Number(rules.adsLookbackDays) || 60 },
     })).json(),
     onSuccess: () => { invalidateRegistry(queryClient, clientId); toast({ title: "Saved" }); onClose(); },
     onError: (e) => toast({ title: "Could not save", description: errorText(e), variant: "destructive" }),
@@ -260,7 +289,7 @@ function SettingsSheet({ clientId, data, open, onClose }: { clientId: string; da
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-lg">
         <SheetHeader className="border-b border-border p-4 text-left">
-          <SheetTitle>Client code and usual products</SheetTitle>
+          <SheetTitle>Client code, products and date rules</SheetTitle>
           <SheetDescription>Events use these unless they list their own.</SheetDescription>
         </SheetHeader>
         <div className="flex-1 space-y-5 overflow-y-auto p-4">
@@ -273,6 +302,26 @@ function SettingsSheet({ clientId, data, open, onClose }: { clientId: string; da
             <ListInput key={t} label={`Usual ${TIER_LABEL[t]} product`} values={defaults[t] ?? []}
               onChange={(v) => setDefaults({ ...defaults, [t]: v })} suggestions={productOptions} placeholder="Exact product name" />
           ))}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Date rules</CardTitle>
+              <CardDescription>What "Fill dates from ads" uses for this client's events.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {([
+                ["cartDays", "Cart stays open", "days after the event"],
+                ["followUpDays", "Sales team follow-up", "days after cart close"],
+                ["adsLookbackDays", "Look for ads", "days before the event"],
+              ] as const).map(([k, label, unit]) => (
+                <div key={k} className="space-y-1">
+                  <Label htmlFor={`rule-${k}`}>{label}</Label>
+                  <Input id={`rule-${k}`} className="h-11" inputMode="numeric" value={rules[k]}
+                    onChange={(e) => setRules({ ...rules, [k]: e.target.value.replace(/[^0-9]/g, "") })} />
+                  <p className="text-[11px] text-muted-foreground">{unit}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Full plan values</CardTitle>
@@ -300,4 +349,18 @@ function SettingsSheet({ clientId, data, open, onClose }: { clientId: string; da
       </SheetContent>
     </Sheet>
   );
+}
+
+type FilledDates = {
+  adsStart: string | null; cartOpen: string; cartClose: string; postCartEnd: string;
+  basis: { firstSpend: string | null; lastSpend: string | null; adSpend: number; alreadyRunning: boolean };
+  rules: { cartDays: number; followUpDays: number };
+};
+
+function fillText(r: FilledDates) {
+  const after = `Cart closes ${r.rules.cartDays} days after the event; sales team follow-up counts ${r.rules.followUpDays} more days.`;
+  if (!r.basis.firstSpend) return `No ad spend found on these pages, so the cart opens on the first event day. ${after} Check before saving.`;
+  const ran = `Ads spent ${usd(r.basis.adSpend)} from ${shortDate(r.basis.firstSpend)} to ${shortDate(r.basis.lastSpend!)}.`;
+  const evergreen = r.basis.alreadyRunning ? " They were already running at the start of the search window, so Ads start may need to be earlier." : "";
+  return `${ran}${evergreen} ${after} Check before saving.`;
 }

@@ -52,7 +52,7 @@ export default function EventDetailPage() {
                 </div>
                 <h1 className="mt-1 font-heading text-2xl font-bold tracking-tight">{r.title}</h1>
                 <p className="text-xs text-muted-foreground">
-                  Ads {shortDate(r.adsStart)} · cart {shortDate(r.cartOpen)} – {shortDate(r.cartClose)} · post-cart to {shortDate(r.postCartEnd)}
+                  Ads {shortDate(r.adsStart)} · cart {shortDate(r.cartOpen)} – {shortDate(r.cartClose)} · follow-up to {shortDate(r.postCartEnd)}
                 </p>
                 {main && <p className="text-xs text-muted-foreground">Feeds into <Link href={`/client/${clientId}/registry/${main.id}`} className="underline">{main.registryId}</Link></p>}
               </div>
@@ -98,7 +98,7 @@ export default function EventDetailPage() {
             <Card className="rounded-xl"><CardHeader className="pb-2"><CardTitle className="text-base">Revenue</CardTitle></CardHeader>
               <CardContent><NumberGrid items={[
                 ["Contracted", usdCents(n.contracted)], ["Collected", usdCents(n.collected)], ["Refunds", usdCents(n.refunds)],
-                ["Net revenue", usdCents(n.netRevenue)], ["During cart", usdCents(n.cartOpenRevenue)], ["Post-cart", usdCents(n.postCartRevenue)],
+                ["Net revenue", usdCents(n.netRevenue)], ["During launch", usdCents(n.cartOpenRevenue)], ["Sales team follow-up", usdCents(n.postCartRevenue)],
                 ["Orders", n.orders.toLocaleString()], ["Buyers", n.buyers.toLocaleString()], ["ROAS", roasText(n.roas)],
               ]} /></CardContent>
             </Card>

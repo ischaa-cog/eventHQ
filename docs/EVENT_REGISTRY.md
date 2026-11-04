@@ -13,6 +13,8 @@ The Event Registry lives inside eventHQ, on the **Event Results** page of each w
 | Ad campaign IDs (only when two events run at once) | Ad spend matches these instead of page links |
 | Event offers: product names and our share % | Extra things sold at the event |
 
+**Fill dates from ads** suggests the windows from data (server/registry/dates.ts). Ads start and cart open are the first day ads spent on the event's pages within 60 days before it, so ticket sales during the ad run count. If no ads are found, cart open is the first event day. Cart close is the last event day plus 7 days, the open/close cart sequence. Post-cart end is cart close plus 30 days, for sales team follow-up. Event results show the revenue split as "During launch" (cart open to cart close) and "Sales team follow-up" (after cart close). Each workspace can change the 7, 30 and 60 in settings.
+
 Each workspace also has a **client code** (used in Event IDs like `CA-2611-MINI`; a second Mini in the same month becomes `CA-2611-MINI-2`), **usual products** per tier, and **full plan values** for payment-plan products.
 
 ## Matching rules (server/registry/match.ts)

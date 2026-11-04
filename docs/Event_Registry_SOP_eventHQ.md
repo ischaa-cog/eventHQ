@@ -32,12 +32,17 @@ What we're selling:
 
 1. **Event Results** → **Add event**.
 2. Name, **Main** or **Mini**. For a Mini, pick the Main it feeds into.
-3. Fill the six dates. Ads start and cart close decide which ad spend and opt-ins count; cart open and post-cart end decide which sales count.
+3. Fill the event start and end dates.
 4. **Page links:** pick from the list, or paste the page people see (not the editor). UTMs don't matter.
-5. **Products:** leave a tier empty to use the client's usual product. Only fill it if this event sells something different.
-6. Two events running ads at the same time to the same page? Add their **campaign IDs**.
-7. Save. The event gets its ID (like `CA-2611-MINI`) and its numbers fill in.
-8. Selling extra things? Open the event → **Event offers** → add each offer, its exact product names and our share %.
+5. Tap **Fill dates from ads**. It sets the other four dates from when the ads ran:
+   - **Ads start** and **cart open:** the first day ads spent on those pages, so ticket and VIP sales during the ad run count.
+   - **Cart close:** 7 days after the last event day (the open/close cart sequence).
+   - **Post-cart end:** 30 more days, for sales team follow-up calls.
+   Check them, and change any that are wrong. The 7 and 30 can be changed per client in settings.
+6. **Products:** leave a tier empty to use the client's usual product. Only fill it if this event sells something different.
+7. Two events running ads at the same time to the same page? Add their **campaign IDs**.
+8. Save. The event gets its ID (like `CA-2611-MINI`) and its numbers fill in.
+9. Selling extra things? Open the event → **Event offers** → add each offer, its exact product names and our share %.
 
 ## Keep it up to date
 
@@ -49,6 +54,6 @@ What we're selling:
 | Ad spend says $0 | Add the page link the ads go to |
 | Sales look too low | Add the product from the Unmatched list |
 | Main event total looks small | On the Mini, pick the Main in "Feeds into" |
-| Late sales missing | Push Post-cart end later |
+| Late sales missing | Push Post-cart end later, or raise the follow-up days in settings |
 
 Never rename ads, pages or products to make them match; add them to the event instead.

@@ -10,6 +10,7 @@ import { db } from "../storage";
 import { isAuthenticated } from "../auth";
 import { rematchClient } from "./match";
 import { eventReports } from "./metrics";
+import { datesFromRules, rulesOf, spendSpan } from "./dates";
 import { normalizeName, normalizeUrl, splitList, TIERS, type TierProducts } from "./normalize";
 
 type GetUser = (req: any) => Promise<User | undefined>;
@@ -45,6 +46,17 @@ const settingsSchema = z.object({
   eventCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,8}$/, "Use 1-8 letters or numbers").nullish(),
   defaultProducts: tierProducts.optional(),
   contractValues: z.array(z.object({ productName: z.string().trim().min(1), fullValue: z.coerce.number().positive() })).optional(),
+  dateRules: z.object({
+    cartDays: z.coerce.number().int().min(0).max(60),
+    followUpDays: z.coerce.number().int().min(0).max(365),
+    adsLookbackDays: z.coerce.number().int().min(7).max(180),
+  }).partial().optional(),
+});
+
+const suggestDatesSchema = z.object({
+  eventStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Add the event start date first"),
+  eventEnd: day,
+  pageLinks: list, adCampaignIds: list,
 });
 
 const cleanProducts = (p: Record<string, string[] | undefined> | undefined): TierProducts =>
@@ -109,7 +121,7 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
   // Everything the registry screen needs in one call.
   app.get("/api/clients/:clientId/registry", isAuthenticated, async (req, res) => {
     const clientId = clientIdOf(req);
-    const [client] = await db.select({ eventCode: clients.eventCode, defaultProducts: clients.defaultProducts }).from(clients).where(eq(clients.id, clientId));
+    const [client] = await db.select({ eventCode: clients.eventCode, defaultProducts: clients.defaultProducts, dateRules: clients.registryDateRules }).from(clients).where(eq(clients.id, clientId));
     const events = await db.select().from(eventPerformance).where(eq(eventPerformance.clientId, clientId)).orderBy(desc(eventPerformance.startDate));
     const offers = await db.select().from(eventOffers).where(eq(eventOffers.clientId, clientId));
     const contractValues = await db.select().from(productContractValues).where(eq(productContractValues.clientId, clientId));
@@ -124,7 +136,7 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
         + (select count(*) from ${optIns} where ${optIns.clientId} = ${clientId} and ${optIns.matchStatus} = 'conflict')`,
     }).from(sql`(select 1) as one`);
     res.json({
-      settings: { eventCode: client?.eventCode ?? null, defaultProducts: client?.defaultProducts ?? {}, contractValues },
+      settings: { eventCode: client?.eventCode ?? null, defaultProducts: client?.defaultProducts ?? {}, contractValues, dateRules: rulesOf(client?.dateRules) },
       events: events.map((e) => ({
         id: e.id, registryId: e.registryId, title: e.title, eventType: e.eventType, funnelRole: e.funnelRole, feedsIntoId: e.feedsIntoId,
         eventStart: e.startDate.toISOString().slice(0, 10), eventEnd: e.endDate?.toISOString().slice(0, 10) ?? null,
@@ -167,6 +179,19 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
     });
   });
 
+  // Suggested windows for an event from when its ads ran (see registry/dates.ts). Saves nothing.
+  app.post("/api/clients/:clientId/registry/suggest-dates", isAuthenticated, async (req, res) => {
+    if (!await staffOnly(req, res)) return;
+    const parsed = suggestDatesSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid event" });
+    const clientId = clientIdOf(req);
+    const [client] = await db.select({ rules: clients.registryDateRules }).from(clients).where(eq(clients.id, clientId));
+    const rules = rulesOf(client?.rules);
+    const input = { eventStart: parsed.data.eventStart, eventEnd: parsed.data.eventEnd ?? null, pageLinks: parsed.data.pageLinks ?? [], adCampaignIds: parsed.data.adCampaignIds ?? [] };
+    const span = await spendSpan(clientId, input, rules);
+    res.json({ ...datesFromRules({ ...input, span }, rules), basis: span, rules });
+  });
+
   app.put("/api/clients/:clientId/registry/settings", isAuthenticated, async (req, res) => {
     if (!await staffOnly(req, res)) return;
     const parsed = settingsSchema.safeParse(req.body);
@@ -175,6 +200,10 @@ export function registerRegistryRoutes(app: Express, getRequestUser: GetUser) {
     const set: Record<string, unknown> = {};
     if (parsed.data.eventCode !== undefined) set.eventCode = parsed.data.eventCode;
     if (parsed.data.defaultProducts) set.defaultProducts = cleanProducts(parsed.data.defaultProducts);
+    if (parsed.data.dateRules) {
+      const [current] = await db.select({ rules: clients.registryDateRules }).from(clients).where(eq(clients.id, clientId));
+      set.registryDateRules = rulesOf({ ...rulesOf(current?.rules), ...parsed.data.dateRules });
+    }
     if (Object.keys(set).length) await db.update(clients).set(set).where(eq(clients.id, clientId));
     if (parsed.data.contractValues) {
       await db.transaction(async (tx) => {
