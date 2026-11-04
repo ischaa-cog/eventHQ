@@ -8,6 +8,11 @@
 //        DATABASE_URL=... SESSION_SECRET=... npx tsx script/connect-partners.ts --env ... --map ...
 //   3. Connect, then run each first sync:
 //        DATABASE_URL=... SESSION_SECRET=... npx tsx script/connect-partners.ts --env ... --map ... --apply --sync
+//   Or, without database access, through the live app's own API with your eventHQ admin login:
+//        npx tsx script/connect-partners.ts --api https://your-eventhq-domain.com            (dry run)
+//        npx tsx script/connect-partners.ts --api https://your-eventhq-domain.com --apply    (connect + first syncs)
+//      It asks for your email and password (or reads EVENTHQ_EMAIL / EVENTHQ_PASSWORD). Meta connects
+//      through one agency login made from META_ACCESS_TOKEN; the app runs each first sync itself.
 //
 // SESSION_SECRET (or CREDENTIALS_KEY) must be the same value the deployed app uses, or the app
 // cannot read the stored keys.
@@ -16,11 +21,13 @@
 //   "stripe": [{ "label": "Main account", "key": "STRIPE_API_KEY_2" }], "fanbasis": "FANBASIS_API_KEY",
 //   "highlevel": { "locationId": "Fk0B...", "key": "GHL_API_ALICIA" } }, ...]
 // "match" is part of the workspace name in eventHQ (case-insensitive); it must match exactly one.
+// Optional "code" sets the workspace's client code for Event IDs (e.g. "AL" gives AL-2610-MAIN).
 import { readFileSync } from "fs";
 import { homedir } from "os";
 
 type Mapping = {
   match: string;
+  code?: string;
   meta?: string[];
   whop?: string;
   stripe?: Array<{ label: string; key: string }>;
@@ -103,6 +110,7 @@ async function check(p: Planned): Promise<string> {
 
 async function main() {
   for (const p of problems) console.log(`! ${p}`);
+  if (value("api") && !flag("check")) return viaApi(value("api")!);
   if (flag("check")) {
     for (const p of planned) {
       const result = await check(p);
@@ -137,4 +145,93 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// ---------- Through the live app's API ----------
+
+async function ask(question: string, hidden = false): Promise<string> {
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  if (hidden) {
+    const out = (rl as any).output;
+    (rl as any)._writeToOutput = (text: string) => { out.write(text.startsWith(question) ? question : text.includes("\n") ? "\n" : "*"); };
+  }
+  return new Promise((resolve) => rl.question(question, (answer) => { rl.close(); if (hidden) process.stdout.write("\n"); resolve(answer.trim()); }));
+}
+
+async function viaApi(base: string) {
+  base = base.replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(base)) throw new Error("--api needs the full address, like https://app.example.com");
+  const email = process.env.EVENTHQ_EMAIL || await ask("eventHQ admin email: ");
+  const password = process.env.EVENTHQ_PASSWORD || await ask("Password: ", true);
+  const login = await fetch(`${base}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, portal: "admin" }) });
+  if (!login.ok) throw new Error(`Login failed (${login.status}): ${(await login.text()).slice(0, 200)}`);
+  const cookies = ((login.headers as any).getSetCookie?.() ?? [login.headers.get("set-cookie") ?? ""]) as string[];
+  const cookie = cookies.map((c) => c.split(";")[0]).filter(Boolean).join("; ");
+  const api = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(`${base}${path}`, {
+      method, headers: { Cookie: cookie, "Content-Type": "application/json", Accept: "application/json" },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    const text = await res.text();
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : null; } catch { /* not json */ }
+    if (!res.ok) throw new Error(`${method} ${path} ${res.status}: ${json?.error ?? text.slice(0, 200)}`);
+    return json;
+  };
+  console.log(`Signed in to ${base}.`);
+  const all: Array<{ id: number; name: string }> = await api("GET", "/api/clients");
+  const apply = flag("apply");
+
+  // Meta: one agency login from the token, then each workspace picks its ad account from it.
+  let grantId: number | null = null;
+  const wantsMeta = planned.some((p) => p.provider === "meta");
+  if (wantsMeta && apply) {
+    const grant = await api("POST", "/api/oauth/grants/meta-token", { accessToken: env.META_ACCESS_TOKEN, ...(env.META_APP_SECRET ? { appSecret: env.META_APP_SECRET } : {}) });
+    grantId = grant.id;
+    console.log(`Meta agency login ready: ${grant.displayName ?? grant.accountRef}`);
+  }
+
+  const started: Array<{ clientId: number; clientName: string; id: number; label: string }> = [];
+  for (const m of mappings) {
+    const hits = all.filter((c) => c.name.toLowerCase().includes(m.match.toLowerCase()));
+    if (hits.length !== 1) { console.log(`! "${m.match}" matches ${hits.length} workspaces (${hits.map((h) => h.name).join(", ") || "none"}); skipped`); continue; }
+    const client = hits[0];
+    if (m.code) {
+      if (apply) await api("PUT", `/api/clients/${client.id}/registry/settings`, { eventCode: m.code });
+      console.log(`${apply ? "set" : "would set"} client code ${m.code} on "${client.name}"`);
+    }
+    for (const p of planned.filter((x) => x.partner === m.match)) {
+      if (!apply) { console.log(`would connect ${p.displayName} to "${client.name}"`); continue; }
+      try {
+        const row = p.provider === "meta"
+          ? await api("POST", `/api/clients/${client.id}/integrations/from-grant`, { grantId, accountId: p.externalAccountId })
+          : await api("PUT", `/api/clients/${client.id}/integrations`, { provider: p.provider, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials });
+        started.push({ clientId: client.id, clientName: client.name, id: row.id, label: p.displayName });
+        console.log(`connected ${p.displayName} to "${client.name}"`);
+      } catch (e: any) {
+        console.log(`! ${p.displayName} on "${client.name}": ${e.message}`);
+      }
+    }
+  }
+  if (!apply) { console.log("Dry run. Add --apply to connect."); return; }
+
+  // The app runs each first sync in the background; report as they finish (up to 15 minutes).
+  console.log(`\nWaiting for ${started.length} first syncs...`);
+  const done = new Map<number, string>();
+  const until = Date.now() + 15 * 60_000;
+  while (done.size < started.length && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 20_000));
+    for (const clientId of Array.from(new Set(started.map((s) => s.clientId)))) {
+      const rows: any[] = await api("GET", `/api/clients/${clientId}/integrations`).catch(() => []);
+      for (const s of started.filter((x) => x.clientId === clientId && !done.has(x.id))) {
+        const row = rows.find((r) => r.id === s.id);
+        if (row?.lastError) { done.set(s.id, "error"); console.log(`FAIL ${s.clientName} · ${s.label}: ${row.lastError}`); }
+        else if (row?.lastSyncAt) { done.set(s.id, "ok"); console.log(`ok   ${s.clientName} · ${s.label}`); }
+      }
+    }
+  }
+  const pending = started.filter((s) => !done.has(s.id));
+  if (pending.length) console.log(`${pending.length} still syncing; they keep going on the server: ${pending.map((s) => `${s.clientName} · ${s.label}`).join(", ")}`);
+  process.exit(0);
+}
+
+main().catch((e) => { console.error(e.message ?? e); process.exit(1); });
