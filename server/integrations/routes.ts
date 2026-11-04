@@ -100,7 +100,8 @@ export function registerIntegrationRoutes(app: Express, getRequestUser: GetUser)
     if (!row) return res.status(404).json({ error: "Connection not found" });
     try {
       // Stay inside the hosting time limit; a long sync carries on in the background.
-      const result = await syncConnection(row, { days: Number(req.query.days) || undefined, deadline: Date.now() + 45_000 });
+      // ?restart=1 reads the whole period again instead of resuming from the saved point.
+      const result = await syncConnection(row, { days: Number(req.query.days) || undefined, deadline: Date.now() + 45_000, restart: req.query.restart === "1" });
       if (!result.complete) await kickSync(row.id, 1);
       res.json(result);
     } catch (error: any) {
