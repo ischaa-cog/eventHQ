@@ -133,7 +133,7 @@ async function viaApi(base: string) {
       if (!apply) { console.log(`would connect ${p.displayName} to "${client.name}"`); continue; }
       try {
         let row = p.provider === "meta"
-          ? await api("POST", `/api/clients/${client.id}/integrations/from-grant`, { grantId, accountId: p.externalAccountId })
+          ? await api("POST", `/api/clients/${client.id}/integrations/from-grant`, { grantId, accountId: p.externalAccountId, ...(p.settings ? { settings: p.settings } : {}) })
           : await api("PUT", `/api/clients/${client.id}/integrations`, { provider: p.provider, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials, ...(p.settings ? { settings: p.settings } : {}) });
         if (p.provider === "meta" && p.settings) {
           // Shared ad account: set which websites count, then resync so only those ads stay.
