@@ -19,3 +19,4 @@ loom/
 
 # Local partner-to-account mapping for script/connect-partners.ts (holds account IDs; keep out of the public repo)
 *.local.json
+.env*

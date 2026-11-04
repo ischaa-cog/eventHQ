@@ -9,7 +9,11 @@ They live on **Integrations** for each workspace.
 | Connect link | Stripe (sign in), Whop and Fanbasis (paste a key with step-by-step help) | The client, from a link the admin sends. No eventHQ login needed. The link works for 14 days. |
 | Enter a key | Everything | An admin, on the Integrations page. |
 
-The connect script (`script/connect-partners.ts`) still connects many workspaces at once from a credentials file.
+The connect script (`script/connect-partners.ts`) still connects many workspaces at once from a credentials file. With `--api https://www.mycogportal.com` it works through the live app with an admin login, so no database access is needed.
+
+## Checking the numbers
+
+`npx tsx script/verify-partners.ts --api https://www.mycogportal.com` checks every connected account against the platform itself. It covers the last 30 complete days. It re-downloads each partner's data locally with the same keys and the same sync code, then compares record by record with what eventHQ stored: sales, refunds, amounts, ad spend per day and opt-ins. Meta spend is also compared with Meta's own account total. It changes nothing on the live site, and it needs the local test Postgres (`--ref-db` to use another).
 
 ## Agency logins
 
