@@ -10,6 +10,7 @@ import { isAuthenticated } from "../auth";
 import { appUrl } from "../config";
 import { listConnections, saveConnection, toPublic } from "./connections";
 import { syncConnection } from "./sync";
+import { kickSync } from "./kick";
 
 type GetUser = (req: any) => Promise<User | undefined>;
 
@@ -53,6 +54,8 @@ export function registerIntegrationRoutes(app: Express, getRequestUser: GetUser)
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid connection" });
     // A key typed here replaces any agency login the connection used before.
     const row = await saveConnection({ clientId: clientIdOf(req), ...parsed.data, ...(parsed.data.credentials ? { grantId: null } : {}) });
+    // New or changed keys: start the sync right away instead of waiting for the daily run.
+    if (parsed.data.credentials) await kickSync(row.id);
     res.json({ ...toPublic(row), webhookUrl: webhookUrlFor(row.provider, row.id) });
   });
 
@@ -71,7 +74,10 @@ export function registerIntegrationRoutes(app: Express, getRequestUser: GetUser)
     const row = rows.find((r) => r.id === Number(req.params.id));
     if (!row) return res.status(404).json({ error: "Connection not found" });
     try {
-      res.json(await syncConnection(row, { days: Number(req.query.days) || undefined }));
+      // Stay inside the hosting time limit; a long sync carries on in the background.
+      const result = await syncConnection(row, { days: Number(req.query.days) || undefined, deadline: Date.now() + 45_000 });
+      if (!result.complete) await kickSync(row.id, 1);
+      res.json(result);
     } catch (error: any) {
       res.status(502).json({ error: error.message || "Sync failed" });
     }
