@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fanbasisRecords, metaSpendRows, stripeExcluder, stripeRecords, stripeRefundRecords, whopRecords } from "./sync";
+import { fanbasisRecords, metaSpendRows, siteFilter, stripeExcluder, stripeRecords, stripeRefundRecords, whopRecords } from "./sync";
 
 test("Fanbasis transactions become sales and per-refund rows, in dollars", () => {
   const rows = fanbasisRecords([
@@ -86,4 +86,15 @@ test("HighLevel submissions keep the page they came from", async () => {
   assert.equal(row.pageUrl, "aiinfosession.com/optin");
   assert.equal(row.email, "a@b.com");
   assert.equal(row.externalId, "s1");
+});
+
+test("shared ad accounts keep only ads that point at the client's own websites", () => {
+  assert.equal(siteFilter({}), null, "no filter: every ad counts");
+  const keep = siteFilter({ pageDomains: ["https://www.AIBusinessSummit.com/", "aiinfosession.com"] })!;
+  assert.equal(keep("https://aibusinesssummit.com/mjoin?utm_source=fb"), true);
+  assert.equal(keep("www.aibusinesssummit.com/mvip"), true);
+  assert.equal(keep("https://go.aiinfosession.com/x"), true, "subdomains count");
+  assert.equal(keep("https://scalehersummit.com/summit"), false);
+  assert.equal(keep("https://notaibusinesssummit.com"), false, "not a lookalike domain");
+  assert.equal(keep(null), false, "no landing page: left out once filtered");
 });

@@ -21,6 +21,7 @@ type Connection = {
   lastSyncAt: string | null; lastWebhookAt: string | null; lastError: string | null; hasWebhookSecret: boolean;
   credentialHints: Record<string, string>; webhookUrl: string | null;
   via?: "agency" | "stripe-oauth" | "key"; grantId?: number | null;
+  settings?: { pageDomains?: string[] } | null;
 };
 
 type Grant = {
@@ -217,6 +218,49 @@ function ConnectionRow({ connection: c, clientId }: { connection: Connection; cl
       </div>
       {c.lastError && <p className="rounded bg-amber-500/10 p-2 text-xs text-amber-200">{c.lastError}</p>}
       {c.webhookUrl && c.hasWebhookSecret && <CopyField label="Webhook URL for Whop" value={c.webhookUrl} />}
+      {c.provider === "meta" && <SharedAccountFilter connection={c} clientId={clientId} />}
+    </div>
+  );
+}
+
+// One ad account running ads for several clients: only ads that send people to these sites count here.
+function SharedAccountFilter({ connection: c, clientId }: { connection: Connection; clientId: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const current = c.settings?.pageDomains ?? [];
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(current.join(", "));
+  const save = useMutation({
+    mutationFn: async () => {
+      const domains = text.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean);
+      await apiRequest("PUT", `/api/clients/${clientId}/integrations`, {
+        provider: "meta", externalAccountId: c.externalAccountId, displayName: c.displayName,
+        settings: { ...(c.settings ?? {}), pageDomains: domains },
+      });
+      return (await apiRequest("POST", `/api/clients/${clientId}/integrations/${c.id}/sync`)).json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}/integrations`] });
+      toast({ title: "Saved", description: "Ad spend is recounted for these websites." });
+      setOpen(false);
+    },
+    onError: (e) => toast({ title: "Could not save", description: errorText(e), variant: "destructive" }),
+  });
+  if (!open) {
+    return (
+      <button type="button" className="text-left text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={() => { setText(current.join(", ")); setOpen(true); }}>
+        {current.length ? `Shared account: only ads to ${current.join(", ")} count` : "Shared with other clients? Limit to this client's websites"}
+      </button>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-md border border-dashed border-border p-2">
+      <Label htmlFor={`domains-${c.id}`} className="text-xs">This client's websites (leave empty if the account is only theirs)</Label>
+      <Input id={`domains-${c.id}`} className="h-11" value={text} onChange={(e) => setText(e.target.value)} placeholder="aibusinesssummit.com, aiinfosession.com" />
+      <div className="flex gap-2">
+        <Button className="h-11" onClick={() => save.mutate()} disabled={save.isPending}>Save and recount</Button>
+        <Button variant="ghost" className="h-11" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
     </div>
   );
 }

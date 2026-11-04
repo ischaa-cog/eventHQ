@@ -132,9 +132,14 @@ async function viaApi(base: string) {
     for (const p of planned.filter((x) => x.partner === m.match)) {
       if (!apply) { console.log(`would connect ${p.displayName} to "${client.name}"`); continue; }
       try {
-        const row = p.provider === "meta"
+        let row = p.provider === "meta"
           ? await api("POST", `/api/clients/${client.id}/integrations/from-grant`, { grantId, accountId: p.externalAccountId })
-          : await api("PUT", `/api/clients/${client.id}/integrations`, { provider: p.provider, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials });
+          : await api("PUT", `/api/clients/${client.id}/integrations`, { provider: p.provider, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials, ...(p.settings ? { settings: p.settings } : {}) });
+        if (p.provider === "meta" && p.settings) {
+          // Shared ad account: set which websites count, then resync so only those ads stay.
+          row = await api("PUT", `/api/clients/${client.id}/integrations`, { provider: "meta", externalAccountId: row.externalAccountId, displayName: row.displayName, settings: p.settings });
+          await api("POST", `/api/clients/${client.id}/integrations/${row.id}/sync?days=90`).catch(() => undefined);
+        }
         started.push({ clientId: client.id, clientName: client.name, id: row.id, label: p.displayName });
         console.log(`connected ${p.displayName} to "${client.name}"`);
       } catch (e: any) {
