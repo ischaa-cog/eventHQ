@@ -12,7 +12,8 @@ import { connectionAuth } from "./oauth";
 import { rematchClient } from "../registry/match";
 import { normalizeUrl } from "../registry/normalize";
 
-export type SyncOptions = { days?: number; deadline?: number; fetchImpl?: typeof fetch };
+// restart: ignore a saved resume point and read the whole period again (e.g. after a fix).
+export type SyncOptions = { days?: number; deadline?: number; fetchImpl?: typeof fetch; restart?: boolean };
 export type SyncResult = { provider: string; sales: number; refunds: number; spendRows: number; optIns: number; complete: boolean };
 
 const DAY_MS = 86_400_000;
@@ -398,7 +399,7 @@ async function syncStripe(connection: IntegrationConnection, since: Date, opts: 
   if (!secretKey) throw new Error("Stripe key missing");
   const f = auth.fetchImpl ?? opts.fetchImpl ?? fetch;
   const CHUNK = 3 * DAY_MS;
-  const cursor = connection.lastSyncCursor ? new Date(Number(connection.lastSyncCursor)) : null;
+  const cursor = !opts.restart && connection.lastSyncCursor ? new Date(Number(connection.lastSyncCursor)) : null;
   let from = cursor && cursor > since ? new Date(cursor.getTime() - 2 * DAY_MS) : since;
   let salesCount = 0;
   let refundCount = 0;
@@ -547,7 +548,7 @@ async function syncMeta(connection: IntegrationConnection, since: Date, opts: Sy
   // A run cut off by the time limit leaves lastSyncCursor at the next window to fetch, and the
   // next run carries on from there. A finished run clears it, so later syncs refresh 30 days.
   const WEEK = 7 * DAY_MS;
-  const resume = connection.lastSyncCursor ? Number(connection.lastSyncCursor) : NaN;
+  const resume = !opts.restart && connection.lastSyncCursor ? Number(connection.lastSyncCursor) : NaN;
   const start = Number.isFinite(resume) && resume > since.getTime() && resume <= Date.now() ? resume : since.getTime();
   const windows: Array<[string, string]> = [];
   for (let t = start; t <= Date.now(); t += WEEK) {
@@ -664,40 +665,56 @@ async function syncHighLevel(connection: IntegrationConnection, since: Date, opt
   const f = opts.fetchImpl ?? fetch;
   // HighLevel's firewall rejects requests without a normal user agent.
   const headers = { Authorization: `Bearer ${apiKey}`, Version: "2021-07-28", Accept: "application/json", "User-Agent": "eventhq-sync/1.0" };
-  const WINDOW = 7 * DAY_MS;
-  const cursor = connection.lastSyncCursor ? new Date(Number(connection.lastSyncCursor)) : null;
-  let from = cursor && cursor > since ? new Date(cursor.getTime() - 2 * DAY_MS) : since;
+  // One day at a time, saving after every page, so a busy launch day (tens of thousands of
+  // opt-ins) is read in full and a run cut off by the time limit resumes at the same page.
+  // Cursor: a plain number = finished through that day; {"day","page"} = resume mid-day.
+  const cursor = opts.restart ? null : parseHighLevelCursor(connection.lastSyncCursor);
+  let day = startOfUtcDay(since);
+  let page = 1;
+  if (cursor && cursor.day > since.getTime()) {
+    day = cursor.page ? cursor.day : cursor.day - 2 * DAY_MS;
+    page = cursor.page ?? 1;
+  }
+  const setCursor = (value: string) => db.update(integrationConnections).set({ lastSyncCursor: value }).where(eq(integrationConnections.id, connection.id));
   let saved = 0;
-  while (from.getTime() < Date.now()) {
-    const until = new Date(Math.min(from.getTime() + WINDOW, Date.now() + DAY_MS));
-    const rows: any[] = [];
-    for (let pageNo = 1; pageNo <= 100; pageNo++) {
+  for (; day <= Date.now(); day += DAY_MS, page = 1) {
+    for (; page <= 2000; page++) {
       guard(opts.deadline);
       const url = new URL("https://services.leadconnectorhq.com/forms/submissions");
       url.searchParams.set("locationId", locationId);
       url.searchParams.set("limit", "100");
-      url.searchParams.set("page", String(pageNo));
-      url.searchParams.set("startAt", from.toISOString().slice(0, 10));
-      url.searchParams.set("endAt", until.toISOString().slice(0, 10));
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("startAt", new Date(day).toISOString().slice(0, 10));
+      url.searchParams.set("endAt", new Date(day + DAY_MS).toISOString().slice(0, 10));
       const body = await getJson(f, url.toString(), headers, "HighLevel form submissions");
-      rows.push(...(body.submissions ?? []));
-      if (!body.meta?.nextPage || !(body.submissions ?? []).length) break;
+      const rows: any[] = body.submissions ?? [];
+      const records = highlevelOptIns(rows).map((r) => ({ ...r, clientId: connection.clientId, connectionId: connection.id, provider: "highlevel" }));
+      for (let i = 0; i < records.length; i += 300) {
+        await db.insert(optIns).values(records.slice(i, i + 300)).onConflictDoUpdate({
+          target: [optIns.connectionId, optIns.externalId],
+          set: { email: sql`excluded.email`, pageUrl: sql`excluded.page_url`, pageTitle: sql`excluded.page_title`, submittedAt: sql`excluded.submitted_at` },
+        });
+      }
+      saved += records.length;
+      if (!body.meta?.nextPage || !rows.length) break;
+      await setCursor(JSON.stringify({ day, page: page + 1 }));
     }
-    const records = highlevelOptIns(rows).map((r) => ({
-      ...r, clientId: connection.clientId, connectionId: connection.id, provider: "highlevel",
-    }));
-    for (let i = 0; i < records.length; i += 300) {
-      await db.insert(optIns).values(records.slice(i, i + 300)).onConflictDoUpdate({
-        target: [optIns.connectionId, optIns.externalId],
-        set: { email: sql`excluded.email`, pageUrl: sql`excluded.page_url`, pageTitle: sql`excluded.page_title`, submittedAt: sql`excluded.submitted_at` },
-      });
-    }
-    saved += records.length;
-    await db.update(integrationConnections).set({ lastSyncCursor: String(until.getTime()) })
-      .where(eq(integrationConnections.id, connection.id));
-    from = until;
+    await setCursor(String(day));
   }
   return { optIns: saved };
+}
+
+const startOfUtcDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+
+export function parseHighLevelCursor(value: string | null | undefined): { day: number; page?: number } | null {
+  if (!value) return null;
+  if (/^\d+$/.test(value)) return { day: Number(value) };
+  try {
+    const v = JSON.parse(value);
+    return Number.isFinite(v?.day) ? { day: Number(v.day), page: Number(v.page) || 1 } : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------- Entry points ----------
