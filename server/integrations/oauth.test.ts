@@ -34,7 +34,8 @@ test("signed tokens reject tampering, the wrong kind, and expiry", () => {
   const [body, sig] = token.split(".");
   const forged = Buffer.from(JSON.stringify({ k: "connect", c: 8, exp: Date.now() + 60_000 })).toString("base64url");
   assert.equal(readToken(`${forged}.${sig}`, "connect"), null, "payload is signed");
-  assert.equal(readToken(`${body}.x${sig.slice(1)}`, "connect"), null);
+  const flipped = (sig[0] === "A" ? "B" : "A") + sig.slice(1);
+  assert.equal(readToken(`${body}.${flipped}`, "connect"), null, "signature is checked");
   assert.equal(readToken(signToken({ k: "connect", c: 7 }, -1), "connect"), null, "expired");
   assert.equal(readConnectLink(connectLinkToken(42))?.clientId, 42);
   assert.equal(readConnectLink("garbage"), null);

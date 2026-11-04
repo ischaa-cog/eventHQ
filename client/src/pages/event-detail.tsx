@@ -111,6 +111,12 @@ export default function EventDetailPage() {
                     <span className="tabular-nums">{usd(n.tiers[t].revenue)} <span className="text-xs text-muted-foreground">· {n.tiers[t].count} sold</span></span>
                   </div>
                 ))}
+                {!!n.byDate?.count && (
+                  <div className="flex items-baseline justify-between gap-3 py-2.5 text-sm">
+                    <span className="min-w-0">Other sales in the event's dates<span className="block text-xs text-muted-foreground">Products not on a list yet</span></span>
+                    <span className="shrink-0 tabular-nums">{usd(n.byDate.revenue)} <span className="text-xs text-muted-foreground">· {n.byDate.count} sold</span></span>
+                  </div>
+                )}
                 {n.offers.map((o) => (
                   <div key={o.id} className="flex items-baseline justify-between gap-3 py-2.5 text-sm">
                     <span className="min-w-0 truncate">{o.name}{o.share < 1 && <span className="text-xs text-muted-foreground"> · our {Math.round(o.share * 100)}%</span>}</span>

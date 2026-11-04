@@ -96,6 +96,34 @@ test("opt-ins match by page between Ads Start and Cart Close", () => {
   assert.equal(matchOptIn({ pageUrl: "yourclient.com/masterclass", submittedAt: at("2026-12-01T15:00:00Z") }, [MAIN, MINI]).status, "unmatched");
 });
 
+test("loose mode: anything unlisted inside an event's dates counts toward it, listed matches still win", () => {
+  const rows = [
+    sale("Mystery Bundle", "2026-11-14T17:00:00Z"), // unlisted, inside the Mini's sales window
+    sale("VIP Upgrade 97", "2026-11-13T17:00:00Z"), // listed: stays a normal tier match
+    sale("Mystery Bundle", "2026-12-20T17:00:00Z"), // no event's sales window (Main opens Jan 15)
+    sale("", "2027-01-16T17:00:00Z"), // no product name, inside the Main window
+  ];
+  const strict = matchSales(rows, [MAIN, MINI]);
+  assert.equal(strict.get(rows[0].id)!.status, "unmatched", "strict mode is unchanged");
+  const loose = matchSales(rows, [MAIN, MINI], { loose: true });
+  assert.deepEqual(rows.map((r) => [loose.get(r.id)!.eventId, loose.get(r.id)!.status, loose.get(r.id)!.tier ?? null]), [
+    [2, "window", null], [2, "matched", "vip"], [null, "unmatched", null], [1, "window", null],
+  ]);
+  // Ad spend and opt-ins on unlisted pages inside an event's ads window.
+  assert.deepEqual(
+    [matchSpend({ campaignId: "c9", landingUrl: "other.com/x", date: "2026-10-25" }, [MAIN, MINI], { loose: true })].map((a) => [a.eventId, a.status]),
+    [[2, "window"]],
+  );
+  assert.equal(matchSpend({ campaignId: "c9", landingUrl: "other.com/x", date: "2026-11-18" }, [MAIN, MINI], { loose: true }).status, "unmatched", "after Mini cart close, before Main ads");
+  assert.equal(matchOptIn({ pageUrl: "other.com/x", submittedAt: at("2026-12-05T15:00:00Z") }, [MAIN, MINI], { loose: true }).eventId, 1);
+  // Overlapping windows: the latest cart open wins, like listed matches.
+  const overlap: RegistryEvent = { ...MINI, id: 3, registryId: "CA-2701-MINI", cartOpen: "2027-01-10", cartClose: "2027-01-25", postCartEnd: "2027-02-01" };
+  const both = matchSales([sale("Mystery Bundle", "2027-01-16T17:00:00Z")], [MAIN, overlap], { loose: true });
+  const only = Array.from(both.values())[0];
+  assert.equal(only.eventId, 1);
+  assert.match(String(only.note), /also fits CA-2701-MINI/);
+});
+
 test("database round trip: offers share, contracted vs collected, refunds, and Main roll-up", async () => {
   process.env.SESSION_SECRET ||= "test-session-secret";
   const marker = randomUUID();
@@ -103,6 +131,8 @@ test("database round trip: offers share, contracted vs collected, refunds, and M
   const [client] = await db.insert(clients).values({
     name: `EXAMPLE Client A ${marker}`, agencyId: agency.id, eventCode: "CA",
     defaultProducts: { vip: ["VIP Upgrade 97"], platinum: ["Plat Pass"], mainOffer: ["3-Day Live Ticket"], postCart: ["Mastermind 12-Pay"] },
+    // Exact (strict) numbers from the SOP example; loose mode has its own test above.
+    registryDateRules: { countAllInWindow: false },
   }).returning();
   try {
     const [main] = await db.insert(eventPerformance).values({

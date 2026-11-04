@@ -17,8 +17,9 @@ import { cn } from "@/lib/utils";
 import { TIERS, TIER_LABEL, errorText, shortDate, usd, type RegistryEventRow } from "@/components/registry/shared";
 import { invalidateRegistry, useRegistry } from "./event-registry";
 
+type Status = "unmatched" | "window" | "conflict";
 type Groups = {
-  status: "unmatched" | "conflict";
+  status: Status;
   sales: Array<{ name: string | null; source: string; note: string | null; count: number; amount: number; first: string; last: string; events: number[] }>;
   spend: Array<{ url: string | null; campaignId: string; campaignName: string | null; adName: string | null; note: string | null; amount: number; first: string; last: string; events: number[] }>;
   optIns: Array<{ url: string | null; title: string | null; note: string | null; count: number; first: string; last: string; events: number[] }>;
@@ -27,7 +28,7 @@ type Fix = { kind: "product" | "page" | "campaign"; value: string; label: string
 
 export default function RegistryUnmatchedPage() {
   const { id: clientId } = useParams<{ id: string }>();
-  const [status, setStatus] = useState<"unmatched" | "conflict">("unmatched");
+  const [status, setStatus] = useState<Status>("unmatched");
   const { data, isLoading } = useQuery<Groups>({ queryKey: [`/api/clients/${clientId}/registry/unmatched?status=${status}`] });
   const registry = useRegistry(clientId);
   const [fix, setFix] = useState<Fix | null>(null);
@@ -39,18 +40,14 @@ export default function RegistryUnmatchedPage() {
       <div className="mx-auto w-full max-w-4xl space-y-5 pb-24">
         <Link href={`/client/${clientId}/registry`} className="inline-flex h-10 items-center gap-1 text-sm text-muted-foreground"><ArrowLeft className="h-4 w-4" />All events</Link>
         <header>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">{status === "unmatched" ? "Unmatched" : "Conflicts"}</h1>
-          <p className="text-sm text-muted-foreground">
-            {status === "unmatched"
-              ? "Nothing here counts toward any event yet. Each line usually means the registry is missing a product name, page link or date."
-              : "These fit more than one event. They went to the event with the latest cart open; fix the dates if that's wrong."}
-          </p>
+          <h1 className="font-heading text-2xl font-bold tracking-tight">{STATUS_LABEL[status]}</h1>
+          <p className="text-sm text-muted-foreground">{STATUS_HELP[status]}</p>
         </header>
-        <div className="grid grid-cols-2 rounded-lg border border-border p-1" role="tablist">
-          {(["unmatched", "conflict"] as const).map((k) => (
+        <div className="grid grid-cols-3 rounded-lg border border-border p-1" role="tablist">
+          {(["unmatched", "window", "conflict"] as const).map((k) => (
             <button key={k} type="button" role="tab" aria-selected={status === k} onClick={() => setStatus(k)}
               className={cn("h-10 rounded-md text-sm font-medium", status === k ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
-              {k === "unmatched" ? "Unmatched" : "Conflicts"}
+              {STATUS_LABEL[k]}
             </button>
           ))}
         </div>
@@ -66,7 +63,7 @@ export default function RegistryUnmatchedPage() {
               {data.sales.map((g, i) => (
                 <Row key={i} title={g.name ?? "(no product name)"} amount={usd(g.amount)}
                   detail={`${g.source} · ${g.count} payment${g.count === 1 ? "" : "s"} · ${shortDate(g.first)} – ${shortDate(g.last)}`}
-                  note={status === "conflict" ? `Went to ${name(g.events)} · ${g.note ?? ""}` : g.note}
+                  note={status !== "unmatched" ? `Went to ${name(g.events)} · ${g.note ?? ""}` : g.note}
                   action={g.name ? () => setFix({ kind: "product", value: g.name!, label: g.name! }) : undefined} actionLabel="Add product to an event" />
               ))}
             </TabsContent>
@@ -75,7 +72,7 @@ export default function RegistryUnmatchedPage() {
               {data.spend.map((g, i) => (
                 <Row key={i} title={g.url ?? g.campaignName ?? g.campaignId} amount={usd(g.amount)}
                   detail={`${g.campaignName ?? g.campaignId} · ${shortDate(g.first)} – ${shortDate(g.last)}`}
-                  note={status === "conflict" ? `Went to ${name(g.events)} · ${g.note ?? ""}` : g.note}
+                  note={status !== "unmatched" ? `Went to ${name(g.events)} · ${g.note ?? ""}` : g.note}
                   action={() => setFix(g.url ? { kind: "page", value: g.url, label: g.url } : { kind: "campaign", value: g.campaignId, label: g.campaignName ?? g.campaignId })}
                   actionLabel={g.url ? "Add page to an event" : "Add campaign to an event"} />
               ))}
@@ -85,7 +82,7 @@ export default function RegistryUnmatchedPage() {
               {data.optIns.map((g, i) => (
                 <Row key={i} title={g.url ?? "(no page recorded)"} amount={`${g.count}`}
                   detail={`${g.title ?? "Opt-in page"} · ${shortDate(g.first)} – ${shortDate(g.last)}`}
-                  note={status === "conflict" ? `Went to ${name(g.events)} · ${g.note ?? ""}` : g.note}
+                  note={status !== "unmatched" ? `Went to ${name(g.events)} · ${g.note ?? ""}` : g.note}
                   action={g.url ? () => setFix({ kind: "page", value: g.url!, label: g.url! }) : undefined} actionLabel="Add page to an event" />
               ))}
             </TabsContent>
@@ -96,6 +93,13 @@ export default function RegistryUnmatchedPage() {
     </AppLayout>
   );
 }
+
+const STATUS_LABEL: Record<Status, string> = { unmatched: "Unmatched", window: "By date only", conflict: "Conflicts" };
+const STATUS_HELP: Record<Status, string> = {
+  unmatched: "Nothing here counts toward any event. Each line usually means a date is missing, or it falls outside every event's dates.",
+  window: "These count toward the event whose dates they fall in, but their product or page is not on its list. Add them to the right list for exact tier numbers.",
+  conflict: "These fit more than one event. They went to the event with the latest cart open; fix the dates if that's wrong.",
+};
 
 function Empty() {
   return <Card className="rounded-xl"><CardContent className="p-4 text-sm text-muted-foreground">Nothing here.</CardContent></Card>;

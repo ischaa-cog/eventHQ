@@ -12,6 +12,7 @@ export type EventNumbers = {
   adSpend: number; impressions: number; clicks: number; cpm: number | null; cpc: number | null; adLeads: number;
   optIns: number; optInRate: number | null; costPerOptIn: number | null;
   tiers: Record<Tier, Money>;
+  byDate: Money; // sales counted by date only (loose mode): product not on any list yet
   offers: Array<{ id: number; name: string; share: number; count: number; revenue: number; ourRevenue: number }>;
   contracted: number; collected: number; refunds: number; netRevenue: number; roas: number | null;
   cartOpenRevenue: number; postCartRevenue: number; buyers: number; orders: number;
@@ -33,6 +34,7 @@ function empty() {
   return {
     adSpend: 0, impressions: 0, clicks: 0, adLeads: 0, optIns: 0,
     tiers: Object.fromEntries(TIERS.map((t) => [t, { count: 0, revenue: 0 }])) as Record<Tier, Money>,
+    byDate: { count: 0, revenue: 0 } as Money,
     offers: new Map<number, { id: number; name: string; share: number; count: number; revenue: number; ourRevenue: number }>(),
     contracted: 0, collected: 0, refunds: 0, cartOpenRevenue: 0, postCartRevenue: 0, orders: 0,
     buyers: new Set<string>(), contractedKeys: new Set<string>(),
@@ -47,6 +49,7 @@ function finish(a: Acc): EventNumbers {
     cpm: a.impressions > 0 ? round2((a.adSpend / a.impressions) * 1000) : null, cpc: div(a.adSpend, a.clicks), adLeads: a.adLeads,
     optIns: a.optIns, optInRate: a.clicks > 0 ? round2((a.optIns / a.clicks) * 100) : null, costPerOptIn: div(a.adSpend, a.optIns),
     tiers: Object.fromEntries(TIERS.map((t) => [t, { count: a.tiers[t].count, revenue: round2(a.tiers[t].revenue) }])) as Record<Tier, Money>,
+    byDate: { count: a.byDate.count, revenue: round2(a.byDate.revenue) },
     offers: Array.from(a.offers.values()).map((o) => ({ ...o, revenue: round2(o.revenue), ourRevenue: round2(o.ourRevenue) })),
     contracted: round2(a.contracted), collected: round2(a.collected), refunds: round2(a.refunds), netRevenue: net,
     roas: div(net, a.adSpend), cartOpenRevenue: round2(a.cartOpenRevenue), postCartRevenue: round2(a.postCartRevenue),
@@ -59,6 +62,7 @@ function merge(into: Acc, from: Acc) {
   into.optIns += from.optIns; into.contracted += from.contracted; into.collected += from.collected; into.refunds += from.refunds;
   into.cartOpenRevenue += from.cartOpenRevenue; into.postCartRevenue += from.postCartRevenue; into.orders += from.orders;
   for (const t of TIERS) { into.tiers[t].count += from.tiers[t].count; into.tiers[t].revenue += from.tiers[t].revenue; }
+  into.byDate.count += from.byDate.count; into.byDate.revenue += from.byDate.revenue;
   for (const [id, o] of Array.from(from.offers.entries())) {
     const cur = into.offers.get(id);
     if (cur) { cur.count += o.count; cur.revenue += o.revenue; cur.ourRevenue += o.ourRevenue; } else into.offers.set(id, { ...o });
@@ -108,6 +112,9 @@ export async function eventReports(clientId: number, onlyEventIds?: number[]): P
     } else if (s.matchTier && (TIERS as readonly string[]).includes(s.matchTier)) {
       a.tiers[s.matchTier as Tier].count += 1;
       a.tiers[s.matchTier as Tier].revenue += amount;
+    } else if (s.matchStatus === "window") {
+      a.byDate.count += 1;
+      a.byDate.revenue += amount;
     }
     // Contracted: the full plan value once per buyer and product; later installments add nothing.
     const name = normalizeName(s.productName) ?? "";

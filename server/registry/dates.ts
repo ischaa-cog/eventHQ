@@ -10,8 +10,9 @@ import { adSpendDaily } from "@shared/schema";
 import { db } from "../storage";
 import { normalizeUrl } from "./normalize";
 
-export type DateRules = { cartDays: number; followUpDays: number; adsLookbackDays: number };
-export const DEFAULT_DATE_RULES: DateRules = { cartDays: 7, followUpDays: 30, adsLookbackDays: 60 };
+// countAllInWindow: loose matching (registry/match.ts). On unless a client turns it off.
+export type DateRules = { cartDays: number; followUpDays: number; adsLookbackDays: number; countAllInWindow: boolean };
+export const DEFAULT_DATE_RULES: DateRules = { cartDays: 7, followUpDays: 30, adsLookbackDays: 60, countAllInWindow: true };
 
 const clamp = (v: unknown, min: number, max: number, fallback: number) => {
   const n = Number(v);
@@ -24,6 +25,7 @@ export function rulesOf(value: unknown): DateRules {
     cartDays: clamp(v.cartDays, 0, 60, DEFAULT_DATE_RULES.cartDays),
     followUpDays: clamp(v.followUpDays, 0, 365, DEFAULT_DATE_RULES.followUpDays),
     adsLookbackDays: clamp(v.adsLookbackDays, 7, 180, DEFAULT_DATE_RULES.adsLookbackDays),
+    countAllInWindow: typeof v.countAllInWindow === "boolean" ? v.countAllInWindow : DEFAULT_DATE_RULES.countAllInWindow,
   };
 }
 

@@ -48,6 +48,7 @@ What we're selling:
 
 - **The day after cart closes:** check the dates and offers on the event.
 - **Every Monday:** Event Results → **Unmatched**. Each line is something no event claims. Tap **Add … to an event** and pick the right one. Check **Conflicts** too.
+- **When there's time:** the **By date only** tab lists sales, ads and opt-ins that already count toward an event because of its dates, but whose product or page isn't on its list. Adding them to the right tier makes the VIP / Platinum / offer numbers exact. Nothing there is missing from revenue.
 
 | You see | Fix |
 | --- | --- |
