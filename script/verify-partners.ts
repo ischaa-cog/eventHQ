@@ -3,7 +3,7 @@
 //   npx tsx script/verify-partners.ts --api https://www.mycogportal.com [--days 30]
 //
 // For the last N complete days (ending two days ago, so late changes have settled) it:
-//   1. Re-downloads every partner's data straight from Meta, Whop, Stripe, Fanbasis and HighLevel
+//   1. Re-downloads every partner's last 90 days (so refunds of older sales are included) straight from Meta, Whop, Stripe, Fanbasis and HighLevel
 //      into a throwaway local database (--ref-db, default the local test Postgres), using the
 //      keys in the credentials file and the same sync code eventHQ runs.
 //   2. Fetches what the live app stored for the same connections (ids and amounts only).
@@ -92,8 +92,8 @@ async function main() {
       try {
         // Reference sync, with no time limit, resuming until complete.
         let row = await saveConnection({ clientId: refClient.id, provider: p.provider as any, externalAccountId: p.externalAccountId, displayName: p.displayName, credentials: p.credentials, ...(p.settings ? { settings: p.settings } : {}) });
-        let r = await syncConnection(row, { days: days + 4 });
-        while (!r.complete) { row = (await getConnection(row.id))!; r = await syncConnection(row, { days: days + 4 }); }
+        let r = await syncConnection(row, { days: Math.max(90, days + 4) });
+        while (!r.complete) { row = (await getConnection(row.id))!; r = await syncConnection(row, { days: Math.max(90, days + 4) }); }
         const ref = await refRecords(row.id);
         const got: Records = await api("GET", `/api/clients/${client.id}/integrations/${liveConn.id}/records?from=${wideFrom}&to=${wideTo}`);
         const cmp = compare(ref, got, inWindow, from, to);
