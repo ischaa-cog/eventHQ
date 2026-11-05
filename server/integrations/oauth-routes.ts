@@ -14,7 +14,7 @@ import { webhookUrlFor } from "./routes";
 import { kickSync } from "./kick";
 import { hasFullAccess } from "@shared/roles";
 import {
-  composioFinish, composioMetaFinish, composioMetaLink, composioStripeLink, connectLinkToken, CONNECT_LINK_TTL, getGrant, grantAccounts, grantToPublic,
+  composioFinish, composioStripeLink, connectLinkToken, CONNECT_LINK_TTL, getGrant, grantAccounts, grantToPublic,
   highlevelAuthorizeUrl, highlevelGrantFromCode, listGrants, metaAuthorizeUrl, metaGrantFromCode, metaGrantFromToken,
   oauthConfig, readComposioState, readConnectLink,
 } from "./oauth";
@@ -210,21 +210,12 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
   // workspace it is for, and Composio confirms the account belongs to that workspace.
   app.get("/api/oauth/composio/callback", async (req, res) => {
     const state = readComposioState(String(req.query.state ?? ""));
-    if (!state) return res.redirect("/?oauth_error=" + encodeURIComponent("The sign-in link expired. Try again."));
+    if (!state) return res.redirect("/?oauth_error=" + encodeURIComponent("The Stripe sign-in link expired. Try again."));
     const returnTo = safePath(state.returnTo);
     const isConnectPage = returnTo.startsWith("/connect/");
     const fail = (text: string) => res.redirect(withQuery(returnTo, isConnectPage ? { error: text } : { oauth_error: text }));
-    const label = state.toolkit === "metaads" ? "Facebook" : "Stripe";
-    if (req.query.status && String(req.query.status).toLowerCase() !== "success") return fail(`${label} sign-in was cancelled.`);
+    if (req.query.status && String(req.query.status).toLowerCase() !== "success") return fail("Stripe sign-in was cancelled.");
     const connectedAccountId = (req.query.connected_account_id ?? req.query.connectedAccountId) as string | undefined;
-    if (state.toolkit === "metaads") {
-      try {
-        const grant = await composioMetaFinish({ connectedAccountId, sessionUri: req.query.session_uri as string | undefined, adminUserId: state.adminUserId });
-        return res.redirect(withQuery(returnTo, { oauth: "connected", provider: "meta", grant: String(grant.id) }));
-      } catch (error) {
-        return fail(message(error));
-      }
-    }
     try {
       const done = await composioFinish({
         clientId: state.clientId,
@@ -239,16 +230,6 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
       res.redirect(withQuery(returnTo, isConnectPage ? { connected: "stripe" } : { oauth: "connected", provider: "stripe" }));
     } catch (error) {
       fail(message(error));
-    }
-  });
-
-  app.post("/api/oauth/meta/composio-start", isAuthenticated, async (req, res) => {
-    const user = await requireAdmin(req, res);
-    if (!user) return;
-    try {
-      res.json(await composioMetaLink(safePath(req.body?.returnTo, "/connect-accounts"), user.id));
-    } catch (error) {
-      res.status(502).json({ error: message(error) });
     }
   });
 
@@ -286,6 +267,8 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
     ]);
     res.json({
       composio: oauthConfig().composio.configured,
+      // eventHQ's own Facebook sign-in, when a Meta app is set up (META_APP_ID / META_APP_SECRET).
+      metaSignIn: oauthConfig().meta.configured,
       grants: grants.map(grantToPublic),
       clients: rows.map((c) => ({
         ...c,

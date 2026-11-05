@@ -8,8 +8,8 @@ import { agencies, clients, integrationConnections, oauthGrants, users } from "@
 import { db } from "../storage";
 import { encryptJson } from "../credentials";
 import {
-  composioFetch, composioMetaFinish, connectionAuth, grantAccounts, highlevelGrantFromCode, metaGrantFromToken, readConnectLink,
-  readToken, signToken, connectLinkToken, readComposioState, COMPOSIO_AGENCY_USER,
+  composioFetch, connectionAuth, grantAccounts, highlevelGrantFromCode, metaGrantFromToken, readConnectLink,
+  readToken, signToken, connectLinkToken, readComposioState,
 } from "./oauth";
 import { saveConnection } from "./connections";
 
@@ -200,54 +200,12 @@ test("connect links: public page shows the workspace, bad links fail, admins onl
   }
 });
 
-test("Facebook sign-in through Composio: saved as an agency Meta login, every call goes through the proxy without a token", async () => {
+test("Composio requests never forward a token or proof in the URL", async () => {
   process.env.COMPOSIO_API_KEY = "test-composio-key";
-  const marker = randomUUID();
-  const [agency] = await db.insert(agencies).values({ name: `fb-${marker}` }).returning();
-  const [client] = await db.insert(clients).values({ name: `fb-client-${marker}`, agencyId: agency.id }).returning();
-  let grantId: number | undefined;
-  try {
-    const proxied: Array<{ endpoint: string; params: Record<string, string> }> = [];
-    const { f } = fakeFetch(async (url, init) => {
-      if (url.pathname.endsWith(`/connected_accounts/ca_fb_${marker}`)) {
-        return json({ id: `ca_fb_${marker}`, user_id: COMPOSIO_AGENCY_USER, toolkit: { slug: "metaads" }, status: "ACTIVE" });
-      }
-      if (url.pathname.endsWith("/tools/execute/proxy")) {
-        const body = JSON.parse(String(init?.body));
-        assert.equal(body.connected_account_id, `ca_fb_${marker}`);
-        const params = Object.fromEntries(body.parameters.map((p: any) => [p.name, p.value]));
-        proxied.push({ endpoint: body.endpoint, params });
-        if (body.endpoint.endsWith("/me")) return json({ status: 200, data: { id: `fbuser-${marker}`, name: "Michael" } });
-        if (body.endpoint.endsWith("/me/adaccounts")) return json({ status: 200, data: { data: [{ account_id: "999", name: "Dharius Ads", account_status: 1 }] } });
-      }
-      return json({ error: "unexpected " + url }, 500);
-    });
-
-    // Someone else's sign-in, or one for another app, is refused.
-    await assert.rejects(composioMetaFinish({ connectedAccountId: undefined }, f), /did not finish/);
-
-    const grant = await composioMetaFinish({ connectedAccountId: `ca_fb_${marker}`, adminUserId: null }, f);
-    grantId = grant.id;
-    assert.equal(grant.source, "composio");
-    assert.equal(grant.accountRef, `composio-fbuser-${marker}`);
-    assert.equal(grant.displayName, "Michael (Facebook sign-in)");
-
-    const accounts = await grantAccounts(grant, f);
-    assert.deepEqual(accounts.map((a) => [a.id, a.name]), [["999", "Dharius Ads"]]);
-
-    const conn = await saveConnection({ clientId: client.id, provider: "meta", externalAccountId: "999", credentials: {}, grantId: grant.id });
-    const auth = await connectionAuth(conn, f);
-    assert.ok(auth.fetchImpl, "syncs use the Composio proxy");
-    await auth.fetchImpl!("https://graph.facebook.com/v21.0/act_999/insights?level=ad&access_token=composio&appsecret_proof=x");
-    const last = proxied[proxied.length - 1];
-    assert.equal(last.endpoint, "https://graph.facebook.com/v21.0/act_999/insights");
-    assert.equal(last.params.level, "ad");
-    assert.ok(proxied.every((p) => !("access_token" in p.params) && !("appsecret_proof" in p.params)), "no token or proof is ever forwarded");
-  } finally {
-    if (grantId) await db.delete(oauthGrants).where(eq(oauthGrants.id, grantId));
-    await db.delete(clients).where(eq(clients.id, client.id));
-    await db.delete(agencies).where(eq(agencies.id, agency.id));
-  }
+  const { f, calls } = fakeFetch(() => json({ status: 200, data: {} }));
+  await composioFetch("ca_1", f)("https://api.stripe.com/v1/charges?limit=1&access_token=x&appsecret_proof=y");
+  const params = JSON.parse(String(calls[0].init?.body)).parameters.map((p: any) => p.name);
+  assert.deepEqual(params, ["limit"]);
 });
 
 test("Connect Accounts: admins only, lists every workspace's connections without secrets, keys are checked", async () => {
@@ -298,7 +256,6 @@ test("Connect Accounts: admins only, lists every workspace's connections without
     assert.equal(hl.status, 400);
     assert.match(hl.body.error, /Location ID/, "HighLevel needs the sub-account");
     assert.equal((await call(owner, `/api/clients/999999999/integrations/key`, "POST", { provider: "whop", apiKey: "12345678" })).status, 404);
-    assert.equal((await call(clientUser, "/api/oauth/meta/composio-start", "POST", {})).status, 403);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
