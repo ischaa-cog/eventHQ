@@ -98,3 +98,28 @@ test("shared ad accounts keep only ads that point at the client's own websites",
   assert.equal(keep("https://notaibusinesssummit.com"), false, "not a lookalike domain");
   assert.equal(keep(null), false, "no landing page: left out once filtered");
 });
+
+test("Whop reads payments by account_id, and falls back to company_id for keys that refuse it", async () => {
+  const { whopGet } = await import("./sync");
+  const seen: string[] = [];
+  const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  // A newer owner key: account_id works.
+  const owner = (async (input: any) => {
+    const url = new URL(String(input)); seen.push(url.search);
+    return url.searchParams.has("company_id") ? reply(400, { error: { message: "company_id is not supported; filter by account_id" } }) : reply(200, { data: [{ id: "pay_1" }] });
+  }) as typeof fetch;
+  assert.deepEqual((await whopGet(owner, "key", "biz_1", "payments", { first: "1" }, "Whop payments")).data, [{ id: "pay_1" }]);
+  assert.match(seen[0], /account_id=biz_1/);
+  // A key that only takes company_id still works.
+  seen.length = 0;
+  const legacy = (async (input: any) => {
+    const url = new URL(String(input)); seen.push(url.search);
+    return url.searchParams.has("account_id") ? reply(400, { error: { message: "account_id is not supported" } }) : reply(200, { data: [{ id: "pay_2" }] });
+  }) as typeof fetch;
+  assert.deepEqual((await whopGet(legacy, "key", "biz_1", "payments", { first: "1" }, "Whop payments")).data, [{ id: "pay_2" }]);
+  assert.equal(seen.length, 2);
+  assert.match(seen[1], /company_id=biz_1/);
+  // Other errors are not retried.
+  const denied = (async () => reply(401, { error: { message: "bad key" } })) as typeof fetch;
+  await assert.rejects(whopGet(denied, "key", "biz_1", "payments", {}, "Whop payments"), /401/);
+});
