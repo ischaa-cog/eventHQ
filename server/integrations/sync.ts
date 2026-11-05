@@ -135,16 +135,29 @@ async function markSourceHealthy(clientId: number, processor: string) {
 // ---------- Whop ----------
 // Company API key with payment:basic:read (and refund read). Whop's v1 API lists newest first.
 
+// Whop's newer keys (e.g. owner keys) only accept account_id; older keys accept both.
+// account_id first, company_id if a key refuses it.
+export async function whopGet(fetchImpl: typeof fetch, apiKey: string, accountId: string, path: string, params: Record<string, string>, label: string) {
+  const call = (filter: "account_id" | "company_id") => {
+    const url = new URL(`https://api.whop.com/api/v1/${path}`);
+    url.searchParams.set(filter, accountId);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    return getJson(fetchImpl, url.toString(), { Authorization: `Bearer ${apiKey}` }, label);
+  };
+  try {
+    return await call("account_id");
+  } catch (e: any) {
+    if (!/ 400: /.test(String(e?.message))) throw e;
+    return call("company_id");
+  }
+}
+
 async function whopList(fetchImpl: typeof fetch, apiKey: string, companyId: string, resource: "payments" | "refunds", since: Date, deadline?: number) {
   const out: any[] = [];
   let after: string | undefined;
   for (let page = 0; page < 200; page++) {
     guard(deadline);
-    const url = new URL(`https://api.whop.com/api/v1/${resource}`);
-    url.searchParams.set("first", "100");
-    url.searchParams.set("company_id", companyId);
-    if (after) url.searchParams.set("after", after);
-    const body = await getJson(fetchImpl, url.toString(), { Authorization: `Bearer ${apiKey}` }, `Whop ${resource}`);
+    const body = await whopGet(fetchImpl, apiKey, companyId, resource, { first: "100", ...(after ? { after } : {}) }, `Whop ${resource}`);
     const rows: any[] = body.data ?? [];
     out.push(...rows);
     const oldest = rows[rows.length - 1]?.created_at;

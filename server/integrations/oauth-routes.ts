@@ -12,6 +12,7 @@ import { countAttempt } from "../rate-limit";
 import { saveConnection, toPublic } from "./connections";
 import { webhookUrlFor } from "./routes";
 import { kickSync } from "./kick";
+import { whopGet } from "./sync";
 import { hasFullAccess } from "@shared/roles";
 import {
   composioFinish, composioStripeLink, connectLinkToken, CONNECT_LINK_TTL, getGrant, grantAccounts, grantToPublic,
@@ -48,8 +49,8 @@ async function testKey(provider: "whop" | "fanbasis" | "stripe" | "highlevel", a
   };
   if (provider === "whop") {
     const company = await get("https://api.whop.com/api/v5/company", { Authorization: `Bearer ${apiKey}` }, "Whop");
-    await get(`https://api.whop.com/api/v1/payments?company_id=${encodeURIComponent(company.id)}&first=1`, { Authorization: `Bearer ${apiKey}` },
-      "Whop (the key needs payment read permission)");
+    await whopGet(fetch, apiKey, String(company.id), "payments", { first: "1" }, "Whop (the key needs payment read permission)")
+      .catch((e: Error) => { throw new Error(e.message.replace(/\) (\d{3}):/, ") said $1:")); });
     return { externalAccountId: String(company.id), displayName: (company.title ?? company.name ?? null) as string | null, credentials: { apiKey } };
   }
   if (provider === "highlevel") {
