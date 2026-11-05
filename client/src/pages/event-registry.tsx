@@ -15,7 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
-  EventForm, ListInput, TIERS, TIER_LABEL, errorText, roasText, shortDate, toFormValue, toPayload, usd,
+  EventForm, ListInput, TIERS, TIER_LABEL, errorText, shortDate, toFormValue, toPayload, usd,
   type EventFormValue, type RegistryData, type RegistryEventRow, type Report, type Suggestions, type TierProducts,
 } from "@/components/registry/shared";
 
@@ -124,10 +124,11 @@ export default function EventRegistryPage() {
   );
 }
 
-function Figures({ revenue, spend, roas }: { revenue: number; spend: number; roas: number | null }) {
+// ROAS is hidden for now; the server still works it out.
+function Figures({ revenue, spend }: { revenue: number; spend: number }) {
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {[["Net revenue", usd(revenue)], ["Ad spend", usd(spend)], ["ROAS", roasText(roas)]].map(([l, v]) => (
+    <div className="grid grid-cols-2 gap-2">
+      {[["Net revenue", usd(revenue)], ["Ad spend", usd(spend)]].map(([l, v]) => (
         <div key={l} className="min-w-0">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{l}</p>
           <p className="truncate font-semibold tabular-nums">{v}</p>
@@ -154,7 +155,7 @@ function MainCard({ main, minis, reports, clientId }: { main: RegistryEventRow; 
           </div>
           <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
         </div>
-        {total && <div className="mt-3"><Figures revenue={total.netRevenue} spend={total.adSpend} roas={total.roas} /></div>}
+        {total && <div className="mt-3"><Figures revenue={total.netRevenue} spend={total.adSpend} /></div>}
         {minis.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Includes {minis.length} Mini event{minis.length === 1 ? "" : "s"}</p>}
       </Link>
       {minis.length > 0 && (
@@ -176,7 +177,7 @@ function EventLine({ event: e, report: r, clientId }: { event: RegistryEventRow;
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
       </div>
-      {r && <div className="mt-2"><Figures revenue={r.own.netRevenue} spend={r.own.adSpend} roas={r.own.roas} /></div>}
+      {r && <div className="mt-2"><Figures revenue={r.own.netRevenue} spend={r.own.adSpend} /></div>}
     </Link>
   );
 }

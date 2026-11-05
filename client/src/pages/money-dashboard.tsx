@@ -1,5 +1,5 @@
 // Revenue and ad spend at a glance, built for phones first.
-// Top: one date control and four numbers (revenue, ad spend, ROAS, profit). Then the daily trend,
+// Top: one date control and four numbers (revenue, ad spend, orders, profit; ROAS is hidden for now). Then the daily trend,
 // then one card per event that opens to show its detail, then where the money came from.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "wouter";
@@ -81,7 +81,6 @@ const compactUsd = (v: number) => {
   const s = a >= 1_000_000 ? `${(a / 1_000_000).toFixed(1)}M` : a >= 10_000 ? `${Math.round(a / 1000)}K` : a >= 1000 ? `${(a / 1000).toFixed(1)}K` : `${Math.round(a)}`;
   return `${v < 0 ? "-" : ""}$${s}`;
 };
-const roasText = (v: number | null) => (v === null ? "—" : `${v.toFixed(2)}x`);
 const dayLabel = (d: string) => format(parseISO(d), "MMM d");
 
 function change(current: number | null, previous: number | null): number | null {
@@ -264,7 +263,7 @@ function KpiGrid({ totals, previous, comparable }: { totals: Totals; previous: T
   const tiles = [
     { label: "Revenue", value: usd(totals.revenue), delta: comparable.revenue ? change(totals.revenue, previous.revenue) : null, good: true, testid: "kpi-revenue" },
     { label: "Ad spend", value: usd(totals.adSpend), delta: comparable.adSpend ? change(totals.adSpend, previous.adSpend) : null, good: false, testid: "kpi-spend" },
-    { label: "ROAS", value: roasText(totals.roas), delta: both ? change(totals.roas, previous.roas) : null, good: true, testid: "kpi-roas" },
+    { label: "Orders", value: totals.orders.toLocaleString(), delta: comparable.revenue ? change(totals.orders, previous.orders) : null, good: true, testid: "kpi-orders" },
     { label: "Profit", value: usd(totals.profit), delta: both ? change(totals.profit, previous.profit) : null, good: true, testid: "kpi-profit" },
   ];
   return (
@@ -287,7 +286,6 @@ function MoreNumbers({ totals }: { totals: Totals }) {
   const rows = [
     ["Gross sales", usdCents(totals.grossSales)],
     ["Refunds", usdCents(totals.refunds)],
-    ["Orders", totals.orders.toLocaleString()],
     ["Average order", totals.orders ? usdCents(totals.grossSales / totals.orders) : "—"],
     ["Leads from ads", totals.leads.toLocaleString()],
     ["Cost per lead", totals.costPerLead === null ? "—" : usdCents(totals.costPerLead)],
@@ -359,7 +357,7 @@ function EventsSection({ events, isStaff, clientId }: { events: EventRow[]; isSt
     <section className="space-y-3" aria-labelledby="events-heading">
       <div className="flex items-end justify-between gap-2">
         <h2 id="events-heading" className="font-heading text-lg font-semibold">By event</h2>
-        <Link href={`/client/${clientId}/events`} className="text-sm text-primary">All events</Link>
+        <Link href={`/client/${clientId}/registry`} className="text-sm text-primary">All events</Link>
       </div>
       {events.length === 0 ? (
         <Card className="rounded-xl"><CardContent className="p-4 text-sm text-muted-foreground">No events in this period.</CardContent></Card>
@@ -404,10 +402,9 @@ function EventCard({ event: e, isStaff, clientId }: { event: EventRow; isStaff: 
               </div>
               <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="mt-3 grid grid-cols-2 gap-2">
               <Stat label="Revenue" value={usd(e.revenue)} />
               <Stat label="Ad spend" value={usd(e.adSpend)} />
-              <Stat label="ROAS" value={roasText(e.roas)} />
             </div>
           </button>
         </CollapsibleTrigger>
