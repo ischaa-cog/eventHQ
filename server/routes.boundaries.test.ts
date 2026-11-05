@@ -258,7 +258,22 @@ test("API keeps client logins and events inside the user's tenant and rejects in
     messageIds.push(messageB.id);
     const disguisedPath = `/api/clients/${clientA.id}/tuck/chats/${chatB.id}`;
     assert.equal((await request(adminA, `${disguisedPath}/messages`)).status, 404);
-    assert.equal((await request(customerA, `${disguisedPath}/messages`)).status, 404);
+    // Neo AI is hidden from client logins unless NEO_FOR_CLIENTS=1 (and an OpenAI key) turns it on.
+    const savedNeo = { key: process.env.OPENAI_API_KEY, flag: process.env.NEO_FOR_CLIENTS };
+    try {
+      process.env.OPENAI_API_KEY = "test-key";
+      delete process.env.NEO_FOR_CLIENTS;
+      assert.equal((await request(customerA, `/api/clients/${clientA.id}/tuck/chats`)).status, 403, "clients can't reach Neo while it's hidden");
+      assert.equal((await request(customerA, `/api/clients/${clientA.id}/tuck/chats`, "POST", { title: "x" })).status, 403);
+      assert.equal((await request(customerA, `${disguisedPath}/messages`)).status, 403);
+      assert.equal((await request(adminB, `/api/clients/${clientB.id}/tuck/chats`)).status, 200, "the agency team keeps Neo");
+      process.env.NEO_FOR_CLIENTS = "1";
+      assert.equal((await request(customerA, `/api/clients/${clientA.id}/tuck/chats`)).status, 200, "the switch turns it back on");
+      assert.equal((await request(customerA, `${disguisedPath}/messages`)).status, 404, "and each chat still stays in its own workspace");
+    } finally {
+      if (savedNeo.key === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = savedNeo.key;
+      if (savedNeo.flag === undefined) delete process.env.NEO_FOR_CLIENTS; else process.env.NEO_FOR_CLIENTS = savedNeo.flag;
+    }
     assert.equal((await request(adminA, disguisedPath, "DELETE")).status, 404);
     assert.equal((await request(adminA, `${disguisedPath}/messages`, "POST", { content: "Hello" })).status, 404);
     const actualMessages = await request(adminB, `/api/clients/${clientB.id}/tuck/chats/${chatB.id}/messages`);

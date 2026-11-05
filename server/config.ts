@@ -31,6 +31,8 @@ export function checkConfig(): void {
   }
 }
 
+export const neoForClients = () => !!process.env.OPENAI_API_KEY && process.env.NEO_FOR_CLIENTS === "1";
+
 // Which optional features can actually work in this deployment. The UI hides what is off.
 export function features() {
   const onVercel = !!process.env.VERCEL;
@@ -39,6 +41,9 @@ export function features() {
     // off there until it moves to a durable queue. ENABLE_AI_GENERATION=1 overrides for testing.
     aiGeneration: !!process.env.OPENAI_API_KEY && (!onVercel || process.env.ENABLE_AI_GENERATION === "1"),
     neoChat: !!process.env.OPENAI_API_KEY,
+    // Neo AI is hidden from client logins until it passes its test set; the agency team keeps it.
+    // NEO_FOR_CLIENTS=1 shows it to clients again.
+    neoForClients: neoForClients(),
     email: !!process.env.MAIL_FROM && (!!process.env.RESEND_API_KEY || !!process.env.REPLIT_CONNECTORS_HOSTNAME),
     googleDrive: !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET,
     metaOAuth: !!process.env.META_APP_ID && !!process.env.META_APP_SECRET,

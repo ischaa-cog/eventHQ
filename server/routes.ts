@@ -2,7 +2,7 @@ import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { createHash, randomUUID } from "crypto";
 import { storage, db } from "./storage";
-import { appUrl, features } from "./config";
+import { appUrl, features, neoForClients } from "./config";
 import { insertClientSchema, insertEventSchema, insertAssetSchema, insertVaultAssetSchema, insertWebinarSchema, insertNotificationSchema, insertCalendarEntrySchema, sales as salesTable, salesSources, clientCalendarConnections, notificationRecipients, type User } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import OpenAI from "openai";
@@ -203,11 +203,6 @@ export function registerApiRoutes(app: Express): void {
     { method: "GET", path: /^\/api\/clients\/\d+\/notifications(?:\/unread-count)?\/?$/ },
     { method: "POST", path: /^\/api\/notifications\/\d+\/read\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/calendar\/?$/ },
-    { method: "GET", path: /^\/api\/clients\/\d+\/tuck\/chats\/?$/ },
-    { method: "POST", path: /^\/api\/clients\/\d+\/tuck\/chats\/?$/ },
-    { method: "DELETE", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/?$/ },
-    { method: "GET", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/messages\/?$/ },
-    { method: "POST", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/messages\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/meta-ads\/(?:status|insights)\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/meta-campaigns\/?$/ },
     { method: "GET", path: /^\/api\/clients\/\d+\/training\/resources\/?$/ },
@@ -233,6 +228,14 @@ export function registerApiRoutes(app: Express): void {
     { method: "PATCH", path: /^\/api\/projections\/\d+\/?$/ },
     { method: "DELETE", path: /^\/api\/projections\/\d+\/?$/ },
   ];
+  // Neo AI chat, open to client logins only while NEO_FOR_CLIENTS=1 (see neoForClients in config.ts).
+  const neoClientActions: Array<{ method: string; path: RegExp }> = [
+    { method: "GET", path: /^\/api\/clients\/\d+\/tuck\/chats\/?$/ },
+    { method: "POST", path: /^\/api\/clients\/\d+\/tuck\/chats\/?$/ },
+    { method: "DELETE", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/?$/ },
+    { method: "GET", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/messages\/?$/ },
+    { method: "POST", path: /^\/api\/clients\/\d+\/tuck\/chats\/\d+\/messages\/?$/ },
+  ];
   app.use(async (req: any, res, next) => {
     if (!req.path.startsWith("/api/")) return next();
     let user: User | undefined;
@@ -249,7 +252,8 @@ export function registerApiRoutes(app: Express): void {
     }
     if (user?.role !== "agency_client" && !req.user?.demoLogin) return next();
     const path = (req.originalUrl || req.path).split("?")[0];
-    if (clientPortalActions.some(action => action.method === req.method && action.path.test(path))) {
+    const allowed = neoForClients() ? [...clientPortalActions, ...neoClientActions] : clientPortalActions;
+    if (allowed.some(action => action.method === req.method && action.path.test(path))) {
       return next();
     }
     return forbidden(res);

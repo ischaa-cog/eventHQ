@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode, Suspense, lazy } from "react";
-import { Switch, Route, Redirect, useLocation } from "wouter";
+import { Switch, Route, Redirect, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -161,6 +161,18 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// Neo AI is hidden from client and demo logins until it passes its test set (NEO_FOR_CLIENTS=1 turns it back on).
+// Saved links to the Neo page send those logins to their dashboard instead.
+function NeoFeature({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const params = useParams<{ id: string }>();
+  const clientSide = user?.role === "agency_client" || String(user?.id ?? "").startsWith("demo-client:");
+  const features = useQuery<{ neoForClients?: boolean }>({ queryKey: ["/api/features"], enabled: clientSide, staleTime: 10 * 60_000 });
+  if (!clientSide) return <>{children}</>;
+  if (features.isLoading) return null;
+  return features.data?.neoForClients ? <>{children}</> : <Redirect to={`/client/${params.id}/dashboard`} replace />;
+}
+
 function AdminOnlyFeature({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   return user?.role === "owner" || user?.role === "agency_admin"
@@ -240,7 +252,7 @@ function Router() {
       <Route path="/client/:id/calendar" component={() => <ClientPortalFeature><MarketingCalendarPage /></ClientPortalFeature>} />
       <Route path="/client/:id/sales" component={() => <ClientPortalFeature><LiveSalesFeedPage /></ClientPortalFeature>} />
       <Route path="/client/:id/notifications" component={() => <ClientPortalFeature><ClientNotificationsPage /></ClientPortalFeature>} />
-      <Route path="/client/:id/neo" component={() => <ClientPortalFeature><TalkToNeoPage /></ClientPortalFeature>} />
+      <Route path="/client/:id/neo" component={() => <ClientPortalFeature><NeoFeature><TalkToNeoPage /></NeoFeature></ClientPortalFeature>} />
       {/* Old address from before the Tuck → Neo rename; keeps saved links working. */}
       <Route path="/client/:id/tuck">{(params) => <Redirect to={`/client/${params.id}/neo`} replace />}</Route>
 
