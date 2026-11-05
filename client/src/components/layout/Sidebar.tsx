@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { useNeoVisible } from "@/hooks/use-features";
 import {
   Sheet,
   SheetContent,
@@ -225,7 +226,8 @@ export function Sidebar({ mode = "agency" }: SidebarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user } = useAuth();
   const userRoleIsClient = user?.role === "agency_client";
-  
+  const neoVisible = useNeoVisible(user);
+
   const clientIdMatch = location.match(/\/client\/(\d+)/);
   const currentClientId = clientIdMatch ? clientIdMatch[1] : null;
 
@@ -249,8 +251,9 @@ export function Sidebar({ mode = "agency" }: SidebarProps) {
   });
 
   const getClientNav = (clientId: string) => {
-    const baseNav = userRoleIsClient ? clientPortalNavigation(clientId) : clientNavigation(clientId);
-    
+    const baseNav = (userRoleIsClient ? clientPortalNavigation(clientId) : clientNavigation(clientId))
+      .filter(item => neoVisible || !item.href.endsWith("/neo"));
+
     if (currentClient?.onboardingComplete) {
       return baseNav.map(item => item.name === "Onboarding" ? { ...item, name: "Your Setup" } : item);
     }

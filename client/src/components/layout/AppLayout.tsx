@@ -4,6 +4,8 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { NeoBubble } from "@/components/NeoBubble";
 import { PageMotion } from "@/components/PageMotion";
+import { useAuth } from "@/hooks/useAuth";
+import { useNeoVisible } from "@/hooks/use-features";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -19,6 +21,8 @@ export function AppLayout({ children, title = "EventHQ", mode = "client", showSe
 
   const clientId = params.id;
   const isOnNeoPage = location.endsWith("/neo");
+  const { user } = useAuth();
+  const neoVisible = useNeoVisible(user);
 
   return (
     <div className="flex min-h-screen md:h-screen overflow-hidden bg-background pt-14 md:pt-0">
@@ -29,7 +33,7 @@ export function AppLayout({ children, title = "EventHQ", mode = "client", showSe
           <PageMotion key={location}>{children}</PageMotion>
         </main>
       </div>
-      {mode === "client" && clientId && !isOnNeoPage && (
+      {mode === "client" && clientId && !isOnNeoPage && neoVisible && (
         <NeoBubble clientId={clientId} pageContext={pageContext || title} />
       )}
     </div>
