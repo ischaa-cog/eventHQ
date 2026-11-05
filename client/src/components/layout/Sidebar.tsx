@@ -258,6 +258,7 @@ export function Sidebar({ mode = "agency" }: SidebarProps) {
     ...workspaceNavigation,
     ...(user?.role === "owner" || user?.role === "agency_admin"
       ? [
+          { name: "Connect Accounts", href: "/connect-accounts", icon: Plug },
           { name: "Send Notifications", href: "/send-notifications", icon: Send },
           ...(neoVisible ? [{ name: "Neo Knowledge", href: "/neo-knowledge", icon: BookOpen }] : []),
           { name: "Activity Log", href: "/activity", icon: History },
