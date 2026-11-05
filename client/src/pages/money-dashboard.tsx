@@ -158,7 +158,7 @@ export default function MoneyDashboardPage() {
           </Button>
         </header>
 
-        <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0" role="tablist" aria-label="Date range">
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] md:mx-0 md:px-0 [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Date range">
           <div className="flex w-max gap-2">
             {PRESETS.map((p) => (
               <button
@@ -199,7 +199,8 @@ export default function MoneyDashboardPage() {
             <KpiGrid totals={data.totals} previous={data.previousTotals} comparable={data.comparable} />
             <MoreNumbers totals={data.totals} />
             <TrendCard daily={data.daily} />
-            <EventsSection events={data.events} isStaff={isStaff} clientId={clientId!} />
+            {/* Old hand-entered events with no numbers would only add empty $0 cards. */}
+            <EventsSection events={data.events.filter((e) => e.revenueSource !== "manual" || e.revenue !== 0 || e.adSpend !== 0)} isStaff={isStaff} clientId={clientId!} />
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 [&>*]:min-w-0">
               <SourcesCard rows={data.revenueBySource} total={data.totals.revenue} />
               <CampaignsCard rows={data.spendByCampaign} total={data.totals.adSpend} />
@@ -232,7 +233,7 @@ function NoSourcesNotice({ isAdmin, clientId }: { isAdmin: boolean; clientId: st
         <p className="text-muted-foreground">
           {isAdmin
             ? "Connect Meta, Whop, Stripe or Fanbasis to fill this page automatically."
-            : "Your team is setting up the connections. Numbers typed into Event Tracker still show below."}
+            : "Your team is setting up the connections. Numbers entered by hand still show below."}
         </p>
         {isAdmin && (
           <Button asChild size="sm" className="mt-2 h-10">
@@ -420,7 +421,7 @@ function EventCard({ event: e, isStaff, clientId }: { event: EventRow; isStaff: 
             </dl>
             <div className="flex flex-wrap gap-2 text-xs">
               {manual
-                ? <Badge variant="outline">Numbers typed in Event Tracker</Badge>
+                ? <Badge variant="outline">Numbers entered by hand</Badge>
                 : <Badge variant="outline">Matched by the event registry{e.includesMinis ? ` · includes ${e.miniCount} Mini${e.miniCount === 1 ? "" : "s"}` : ""}</Badge>}
             </div>
             {!manual ? (

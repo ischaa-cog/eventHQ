@@ -16,11 +16,10 @@ export function useFeatures(): Features {
   return data ?? { aiGeneration: false, neoChat: false, neoForClients: false, email: false, googleDrive: false, metaOAuth: false };
 }
 
-// Neo AI is hidden from client (and demo) logins until it passes its test set; the agency team
-// always sees it. The server enforces the same rule.
+// Neo AI is out of the menus and chat bubble for everyone until it passes its test set
+// (NEO_FOR_CLIENTS=1 brings it back). The server also blocks client and demo logins; the agency
+// team can still open the Neo pages by their address to test it.
 export function useNeoVisible(user: { role?: string | null; id?: string | null } | null | undefined): boolean {
   const { neoForClients } = useFeatures();
-  if (!user) return false;
-  const clientSide = user.role === "agency_client" || String(user.id ?? "").startsWith("demo-client:");
-  return clientSide ? neoForClients : true;
+  return !!user && neoForClients;
 }

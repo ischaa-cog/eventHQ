@@ -105,7 +105,8 @@ export default function EventDetailPage() {
 
             <Card className="rounded-xl"><CardHeader className="pb-2"><CardTitle className="text-base">Sales by tier</CardTitle></CardHeader>
               <CardContent className="divide-y divide-border">
-                {TIERS.map((t) => (
+                {/* Until products are sorted into tiers, four $0 rows only add noise; show the tiers that sold. */}
+                {TIERS.filter((t) => n.tiers[t].count > 0 || n.tiers[t].revenue !== 0 || TIERS.some((x) => n.tiers[x].count > 0) ).map((t) => (
                   <div key={t} className="flex items-baseline justify-between py-2.5 text-sm">
                     <span>{TIER_LABEL[t]}</span>
                     <span className="tabular-nums">{usd(n.tiers[t].revenue)} <span className="text-xs text-muted-foreground">· {n.tiers[t].count} sold</span></span>
@@ -113,9 +114,12 @@ export default function EventDetailPage() {
                 ))}
                 {!!n.byDate?.count && (
                   <div className="flex items-baseline justify-between gap-3 py-2.5 text-sm">
-                    <span className="min-w-0">Other sales in the event's dates<span className="block text-xs text-muted-foreground">Products not on a list yet</span></span>
+                    <span className="min-w-0">{TIERS.some((x) => n.tiers[x].count > 0) ? "Other sales in the event's dates" : "All sales in the event's dates"}<span className="block text-xs text-muted-foreground">Not split by tier yet</span></span>
                     <span className="shrink-0 tabular-nums">{usd(n.byDate.revenue)} <span className="text-xs text-muted-foreground">· {n.byDate.count} sold</span></span>
                   </div>
+                )}
+                {!TIERS.some((x) => n.tiers[x].count > 0) && !n.byDate?.count && n.offers.length === 0 && (
+                  <p className="py-2.5 text-sm text-muted-foreground">No sales in this event's dates yet.</p>
                 )}
                 {n.offers.map((o) => (
                   <div key={o.id} className="flex items-baseline justify-between gap-3 py-2.5 text-sm">

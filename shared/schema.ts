@@ -98,6 +98,8 @@ export const clients = pgTable("clients", {
   defaultProducts: jsonb("default_products"), // { vip: string[], platinum: string[], mainOffer: string[], postCart: string[] }
   // How "Fill dates from ads" sets an event's windows: { cartDays, followUpDays, adsLookbackDays }.
   registryDateRules: jsonb("registry_date_rules"),
+  // Link to the client's assets doc or folder (Google Drive, Docs, Sheets, Slides, Dropbox…), shown on Assets.
+  assetsUrl: text("assets_url"),
   onboardingComplete: boolean("onboarding_complete").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

@@ -251,7 +251,7 @@ export function EventSheet({ clientId, data, editing, onClose }: {
         <SheetFooter className="flex-col gap-2 border-t border-border p-4 sm:flex-row">
           {editing && editing !== "new" && (
             <Button variant="ghost" className="h-11 text-muted-foreground sm:mr-auto"
-              onClick={() => { if (window.confirm("Take this event out of the registry? Its Event Tracker numbers stay.")) remove.mutate(); }}>
+              onClick={() => { if (window.confirm("Take this event out of the registry? Numbers entered by hand stay.")) remove.mutate(); }}>
               Remove from registry
             </Button>
           )}

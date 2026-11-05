@@ -1,285 +1,143 @@
+// Assets: one place to open the client's assets doc or folder (logos, headshots, ad creatives,
+// funnel links). The agency team pastes the link here; the client sees an "Open" button.
+import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, ExternalLink, FolderOpen, Pencil } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink, FileText, File, Mail, MessageSquare, Presentation, Video, Image } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { apiRequest } from "@/lib/queryClient";
 
-interface Asset {
-  id: number;
-  eventId: number;
-  assetType: string;
-  title: string;
-  content: string;
-  status: string | null;
-  version: number | null;
-  ownerRole: string | null;
-  driveUrl: string | null;
-  createdAt: string;
-  updatedAt: string;
-  eventName: string;
-  clientName: string;
-}
+type ClientRecord = { id: number; name: string; assetsUrl: string | null; googleDriveFolderId: string | null };
+type GeneratedAsset = { id: number; title: string; assetType: string; content: string; eventName: string };
 
-interface PortalSummary {
-  driveUrl: string | null;
-}
-
-const getAssetIcon = (assetType: string) => {
-  switch (assetType.toLowerCase()) {
-    case "email_sequence":
-    case "email":
-      return Mail;
-    case "social_posts":
-    case "social":
-      return MessageSquare;
-    case "slide_outline":
-    case "slides":
-      return Presentation;
-    case "video_script":
-      return Video;
-    case "image":
-      return Image;
-    default:
-      return FileText;
+const hostLabel = (url: string) => {
+  try {
+    const { hostname, pathname } = new URL(url);
+    if (hostname === "docs.google.com") {
+      const kind = pathname.split("/")[1];
+      return kind === "spreadsheets" ? "Google Sheet" : kind === "presentation" ? "Google Slides" : kind === "forms" ? "Google Form" : "Google Doc";
+    }
+    if (hostname === "drive.google.com") return pathname.includes("/folders/") ? "Google Drive folder" : "Google Drive file";
+    if (hostname.endsWith("dropbox.com")) return "Dropbox";
+    if (hostname.endsWith("notion.so") || hostname.endsWith("notion.site")) return "Notion";
+    if (hostname.endsWith("canva.com")) return "Canva";
+    return hostname.replace(/^www\./, "");
+  } catch {
+    return "Link";
   }
 };
-
-const formatAssetType = (assetType: string) => {
-  return assetType
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-};
-
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 60) {
-    return `${diffMins} min ago`;
-  } else if (diffHours < 24) {
-    return `${diffHours} hours ago`;
-  } else if (diffDays === 1) {
-    return "Yesterday";
-  } else if (diffDays < 7) {
-    return `${diffDays} days ago`;
-  }
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-};
-
-type FilterStatus = "all" | "draft" | "approved";
 
 export default function AssetsPage() {
   const [, params] = useRoute("/client/:id/assets");
-  const clientId = params?.id ? parseInt(params.id) : null;
+  const clientId = Number(params?.id);
+  const { user } = useAuth();
+  const isStaff = !!user && user.role !== "agency_client" && !String(user.id ?? "").startsWith("demo-client:");
   const { toast } = useToast();
-  const [filter, setFilter] = useState<FilterStatus>("all");
+  const queryClient = useQueryClient();
 
-  if (!clientId || isNaN(clientId)) {
-    return (
-      <AppLayout title="Assets Library" mode="client">
-        <div className="text-center py-12 text-muted-foreground">
-          Invalid client. Please select a client from the dashboard.
-        </div>
-      </AppLayout>
-    );
-  }
+  const { data: client, isLoading } = useQuery<ClientRecord>({ queryKey: [`/api/clients/${clientId}`], enabled: Number.isFinite(clientId) });
+  const { data: generated = [] } = useQuery<GeneratedAsset[]>({ queryKey: [`/api/clients/${clientId}/assets`], enabled: isStaff && Number.isFinite(clientId) });
 
-  const { data: assets, isLoading, isError } = useQuery<Asset[]>({
-    queryKey: [`/api/clients/${clientId}/assets`],
-    queryFn: async () => {
-      const res = await fetch(`/api/clients/${clientId}/assets`);
-      if (!res.ok) throw new Error("Failed to fetch assets");
-      return res.json();
+  const link = client?.assetsUrl || (client?.googleDriveFolderId ? `https://drive.google.com/drive/folders/${encodeURIComponent(client.googleDriveFolderId)}` : null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  useEffect(() => { setDraft(client?.assetsUrl ?? link ?? ""); }, [client?.assetsUrl, link]);
+
+  const save = useMutation({
+    mutationFn: async (assetsUrl: string | null) => (await apiRequest("PATCH", `/api/clients/${clientId}/assets-url`, { assetsUrl })).json(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/clients/${clientId}`] });
+      setEditing(false);
+      toast({ title: "Assets link saved" });
     },
+    onError: (error: Error) => toast({ title: "Couldn't save the link", description: error.message.replace(/^\d+:\s*/, ""), variant: "destructive" }),
   });
 
-  const { data: portalSummary } = useQuery<PortalSummary>({
-    queryKey: [`/api/clients/${clientId}/portal-summary`],
-    queryFn: async () => {
-      const res = await fetch(`/api/clients/${clientId}/portal-summary`);
-      if (!res.ok) throw new Error("Failed to fetch portal summary");
-      return res.json();
-    },
-  });
-
-  const handleDownload = (asset: Asset) => {
-    const blob = new Blob([asset.content], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${asset.title.replace(/[^a-z0-9]/gi, "_")}.txt`;
-    document.body.appendChild(a);
+  const download = (asset: GeneratedAsset) => {
+    const url = URL.createObjectURL(new Blob([asset.content], { type: "text/plain" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: `${asset.title.replace(/[^a-z0-9]/gi, "_")}.txt` });
     a.click();
-    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast({
-      title: "Downloaded",
-      description: `${asset.title} has been downloaded.`,
-    });
   };
 
   return (
-    <AppLayout title="Assets Library" mode="client">
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div className="flex gap-2">
-            <Button 
-              variant={filter === "all" ? "secondary" : "ghost"} 
-              size="sm" 
-              onClick={() => setFilter("all")}
-              data-testid="button-filter-all"
-            >
-              All
-            </Button>
-            <Button 
-              variant={filter === "draft" ? "secondary" : "ghost"} 
-              size="sm" 
-              onClick={() => setFilter("draft")}
-              data-testid="button-filter-drafts"
-            >
-              Drafts
-            </Button>
-            <Button 
-              variant={filter === "approved" ? "secondary" : "ghost"} 
-              size="sm" 
-              onClick={() => setFilter("approved")}
-              data-testid="button-filter-approved"
-            >
-              Approved
-            </Button>
-          </div>
-          {portalSummary?.driveUrl ? (
-            <a href={portalSummary.driveUrl} target="_blank" rel="noreferrer">
-              <Button variant="outline" data-testid="button-open-drive">
-                <ExternalLink className="mr-2 h-4 w-4" /> Open Drive Folder
-              </Button>
-            </a>
-          ) : (
-            <div className="flex flex-col items-end gap-1">
-              <Button
-                variant="outline"
-                disabled
-                title="No Drive folder has been connected for this client."
-                data-testid="button-open-drive"
-              >
-                <ExternalLink className="mr-2 h-4 w-4" /> Drive folder unavailable
-              </Button>
-              <span className="text-xs text-muted-foreground">No Drive folder connected for this client.</span>
-            </div>
-          )}
-        </div>
+    <AppLayout title="Assets" mode="client">
+      <div className="mx-auto max-w-2xl space-y-4">
+        <Card className="rounded-xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">{client?.name ? `${client.name}'s assets` : "Assets"}</CardTitle>
+            <p className="text-sm text-muted-foreground">Logos, headshots, ad creatives, copy and links, all in one doc.</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {isLoading ? (
+              <div className="h-11 animate-pulse rounded-lg bg-muted" />
+            ) : link && !editing ? (
+              <>
+                <Button asChild size="lg" className="h-12 w-full text-base" data-testid="button-open-assets">
+                  <a href={link} target="_blank" rel="noopener noreferrer">
+                    <FolderOpen className="mr-2 h-5 w-5" /> Open assets
+                    <ExternalLink className="ml-2 h-4 w-4 opacity-70" />
+                  </a>
+                </Button>
+                <p className="text-center text-xs text-muted-foreground">Opens the {hostLabel(link)} in a new tab.</p>
+                {isStaff && (
+                  <Button variant="ghost" size="sm" className="h-10 w-full" onClick={() => setEditing(true)} data-testid="button-edit-assets-link">
+                    <Pencil className="mr-2 h-4 w-4" /> Change link
+                  </Button>
+                )}
+              </>
+            ) : isStaff ? (
+              <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); save.mutate(draft.trim() || null); }}>
+                <Label htmlFor="assets-link">Link to the assets doc or folder</Label>
+                <Input
+                  id="assets-link" type="url" inputMode="url" className="h-11" value={draft}
+                  onChange={(e) => setDraft(e.target.value)} placeholder="https://drive.google.com/…" data-testid="input-assets-link"
+                />
+                <p className="text-xs text-muted-foreground">A Google Doc, Sheet, Slides or Drive folder, Dropbox, Notion or Canva link. Make sure the client can open it.</p>
+                <div className="flex gap-2">
+                  <Button type="submit" className="h-11 flex-1" disabled={save.isPending} data-testid="button-save-assets-link">
+                    {save.isPending ? "Saving…" : "Save link"}
+                  </Button>
+                  {editing && <Button type="button" variant="outline" className="h-11" onClick={() => { setEditing(false); setDraft(client?.assetsUrl ?? link ?? ""); }}>Cancel</Button>}
+                </div>
+                {editing && client?.assetsUrl && (
+                  <Button type="button" variant="ghost" size="sm" className="w-full text-destructive" disabled={save.isPending} onClick={() => save.mutate(null)}>
+                    Remove link
+                  </Button>
+                )}
+              </form>
+            ) : (
+              <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                Your team hasn't added your assets doc yet.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
-        <div className="rounded-md border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[300px]">Asset Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Context</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    Loading assets...
-                  </TableCell>
-                </TableRow>
-              ) : isError ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-destructive">
-                    Unable to load assets. Please try again.
-                  </TableCell>
-                </TableRow>
-              ) : !assets || assets.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    No assets yet.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                assets
-                  .filter((asset) => {
-                    if (filter === "all") return true;
-                    if (filter === "approved") return asset.status === "approved";
-                    if (filter === "draft") return !asset.status || asset.status === "draft";
-                    return true;
-                  })
-                  .map((asset) => {
-                  const IconComponent = getAssetIcon(asset.assetType);
-                  return (
-                    <TableRow key={asset.id} data-testid={`row-asset-${asset.id}`}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-muted rounded-md">
-                            <IconComponent className="h-4 w-4 text-primary" />
-                          </div>
-                          {asset.title}
-                        </div>
-                      </TableCell>
-                      <TableCell>{formatAssetType(asset.assetType)}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium">{asset.clientName}</span>
-                          <span className="text-xs text-muted-foreground">{asset.eventName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            asset.status === "approved"
-                              ? "default"
-                              : asset.status === "in_review"
-                              ? "secondary"
-                              : "outline"
-                          }
-                          className={
-                            asset.status === "approved"
-                              ? "bg-green-100 text-green-700 hover:bg-green-200 border-green-200 shadow-none"
-                              : asset.status === "in_review"
-                              ? "bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200 shadow-none"
-                              : "text-muted-foreground"
-                          }
-                        >
-                          {asset.status ? formatAssetType(asset.status) : "Draft"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {formatDate(asset.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDownload(asset)}
-                          data-testid={`button-download-${asset.id}`}
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        {isStaff && generated.length > 0 && (
+          <Card className="rounded-xl">
+            <CardHeader className="pb-2"><CardTitle className="text-base">Generated drafts</CardTitle></CardHeader>
+            <CardContent className="divide-y divide-border p-0">
+              {generated.map((asset) => (
+                <div key={asset.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{asset.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{asset.eventName}</p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={() => download(asset)} aria-label={`Download ${asset.title}`}>
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </AppLayout>
   );

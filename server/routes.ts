@@ -1558,6 +1558,29 @@ export function registerApiRoutes(app: Express): void {
     res.json({ folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null });
   });
 
+  // The client's assets doc or folder: any https link (Google Drive, Docs, Sheets, Slides, Dropbox…).
+  // The agency team sets it; the client sees it on their Assets page.
+  app.patch("/api/clients/:clientId/assets-url", isAuthenticated, async (req: any, res) => {
+    const user = await getRequestUser(req);
+    const clientId = Number(req.params.clientId);
+    if (!user || user.role === "agency_client" || !await canAccessClient(user, clientId)) return forbidden(res);
+    const input = z.object({ assetsUrl: z.string().trim().max(2048).nullable() }).safeParse(req.body);
+    if (!input.success) return res.status(400).json({ error: "Paste a link to the assets doc or folder." });
+    let assetsUrl: string | null = null;
+    if (input.data.assetsUrl) {
+      try {
+        const parsed = new URL(input.data.assetsUrl);
+        if (parsed.protocol !== "https:") throw new Error();
+        assetsUrl = parsed.toString();
+      } catch {
+        return res.status(400).json({ error: "Use a full https:// link to the assets doc or folder." });
+      }
+    }
+    const updated = await storage.updateClient(clientId, { assetsUrl } as any);
+    if (!updated) return res.status(404).json({ error: "Client not found" });
+    res.json({ assetsUrl });
+  });
+
   app.delete("/api/clients/:clientId/google-drive", isAuthenticated, async (req: any, res) => {
     try {
       const user = await getRequestUser(req);

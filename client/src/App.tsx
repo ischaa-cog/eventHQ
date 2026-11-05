@@ -156,7 +156,7 @@ function ClientPortalFeature({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|overview|team|registry(?:\/\d+)?|calendar|sales|events|ads|projections|training|notifications|neo)$/);
+  const clientPath = location.match(/^\/client\/(\d+)\/(dashboard|overview|team|registry(?:\/\d+)?|calendar|sales|events|ads|projections|training|notifications|assets|neo)$/);
   if (!clientPath || Number(clientPath[1]) !== clients.data?.[0]?.id) return <AccessDeniedPage />;
   return <>{children}</>;
 }
@@ -244,7 +244,7 @@ function Router() {
       <Route path="/client/:id/onboarding" component={() => <InternalOnlyFeature><ClientOnboardingPage /></InternalOnlyFeature>} />
       <Route path="/client/:id/workspace" component={() => <InternalOnlyFeature><ClientWorkspacePage /></InternalOnlyFeature>} />
       {/* Event Builder (client/src/pages/event-builder.tsx) is hidden for now; re-add its route here to bring it back. */}
-      <Route path="/client/:id/assets" component={() => <InternalOnlyFeature><AssetsPage /></InternalOnlyFeature>} />
+      <Route path="/client/:id/assets" component={() => <ClientPortalFeature><AssetsPage /></ClientPortalFeature>} />
       <Route path="/client/:id/events" component={() => <ClientPortalFeature><EventTrackerPage /></ClientPortalFeature>} />
       <Route path="/client/:id/ads" component={() => <ClientPortalFeature><AdCampaignsPage /></ClientPortalFeature>} />
       <Route path="/client/:id/projections" component={() => <ClientPortalFeature><ClientProjectionsPage /></ClientPortalFeature>} />
