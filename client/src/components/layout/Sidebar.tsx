@@ -4,11 +4,8 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Users,
-  Calendar,
-  TrendingUp,
   LogOut,
   Briefcase,
-  Video,
   GraduationCap,
   Bell,
   ClipboardList,
@@ -17,14 +14,13 @@ import {
   Bot,
   Send,
   Settings,
-  Image,
   WandSparkles,
   BookOpen,
   History,
-  Megaphone,
   Plug,
   UsersRound,
   Trophy,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
@@ -115,39 +111,33 @@ const workspaceNavigation = [
   { name: "Notifications", href: "/notifications", icon: Bell },
 ];
 
+// Only pages that work with the synced numbers are in the menus. Overview, Event Tracker, Ad Campaigns,
+// Marketing Calendar and Projections are hidden: they repeat the Revenue & Ad Spend dashboard
+// with older data or need setup that isn't done. Their addresses still open for anyone with a link.
 const clientNavigation = (clientId: string) => [
   { name: "Revenue & Ad Spend", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
   { name: "Event Results", href: `/client/${clientId}/registry`, icon: Trophy },
-  { name: "Overview", href: `/client/${clientId}/overview`, icon: ClipboardList },
-  { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
-  { name: "Client Workspaces", href: "/clients", icon: Users },
-  { name: "Onboarding", href: `/client/${clientId}/onboarding`, icon: ClipboardList },
-  { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
-  { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
-  { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },
-  { name: "Ad Campaigns", href: `/client/${clientId}/ads`, icon: Megaphone },
   { name: "Integrations", href: `/client/${clientId}/integrations`, icon: Plug },
-  { name: "Assets", href: `/client/${clientId}/assets`, icon: Image },
-  { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
-  { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
+  { name: "Assets", href: `/client/${clientId}/assets`, icon: FolderOpen },
+  { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
+  { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
+  { name: "Onboarding", href: `/client/${clientId}/onboarding`, icon: ClipboardList },
   { name: "Team", href: `/client/${clientId}/team`, icon: UsersRound },
+  { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
   { name: "Client Profile", href: `/client/${clientId}/workspace`, icon: Briefcase },
+  { name: "Client Workspaces", href: "/clients", icon: Users },
 ];
 
 const clientPortalNavigation = (clientId: string) => [
   { name: "Revenue & Ad Spend", href: `/client/${clientId}/dashboard`, icon: LayoutDashboard },
   { name: "Event Results", href: `/client/${clientId}/registry`, icon: Trophy },
-  { name: "Overview", href: `/client/${clientId}/overview`, icon: ClipboardList },
-  { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
-  { name: "Marketing Calendar", href: `/client/${clientId}/calendar`, icon: Calendar },
   { name: "Live Sales Feed", href: `/client/${clientId}/sales`, icon: DollarSign },
-  { name: "Event Tracker", href: `/client/${clientId}/events`, icon: Video },
-  { name: "Ad Campaigns", href: `/client/${clientId}/ads`, icon: Megaphone },
-  { name: "Projections", href: `/client/${clientId}/projections`, icon: TrendingUp },
+  { name: "Assets", href: `/client/${clientId}/assets`, icon: FolderOpen },
+  { name: "Talk to Neo AI", href: `/client/${clientId}/neo`, icon: Bot, special: true },
   { name: "Training Lab", href: `/client/${clientId}/training`, icon: GraduationCap },
-  { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
   { name: "Team", href: `/client/${clientId}/team`, icon: UsersRound },
+  { name: "Notifications", href: `/client/${clientId}/notifications`, icon: Bell },
 ];
 
 interface SidebarProps {
@@ -269,7 +259,7 @@ export function Sidebar({ mode = "agency" }: SidebarProps) {
     ...(user?.role === "owner" || user?.role === "agency_admin"
       ? [
           { name: "Send Notifications", href: "/send-notifications", icon: Send },
-          { name: "Neo Knowledge", href: "/neo-knowledge", icon: BookOpen },
+          ...(neoVisible ? [{ name: "Neo Knowledge", href: "/neo-knowledge", icon: BookOpen }] : []),
           { name: "Activity Log", href: "/activity", icon: History },
           { name: "Admin Settings", href: "/admin", icon: Settings },
         ]
