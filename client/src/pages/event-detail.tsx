@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import {
-  ListInput, NumberGrid, TIERS, TIER_LABEL, errorText, pct, roasText, shortDate, usd, usdCents,
+  ListInput, NumberGrid, TIERS, TIER_LABEL, errorText, pct, shortDate, usd, usdCents,
   type Numbers, type Offer, type Report, type Suggestions,
 } from "@/components/registry/shared";
 import { EventSheet, invalidateRegistry, useRegistry } from "./event-registry";
@@ -75,7 +75,7 @@ export default function EventDetailPage() {
             )}
 
             <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {[["Net revenue", usd(n.netRevenue)], ["Ad spend", usd(n.adSpend)], ["ROAS", roasText(n.roas)], ["Opt-ins", n.optIns.toLocaleString()]].map(([l, v]) => (
+              {[["Net revenue", usd(n.netRevenue)], ["Ad spend", usd(n.adSpend)], ["Orders", n.orders.toLocaleString()], ["Opt-ins", n.optIns.toLocaleString()]].map(([l, v]) => (
                 <Card key={l} className="rounded-xl"><CardContent className="p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{l}</p>
                   <p className="font-heading text-2xl font-bold tabular-nums">{v}</p>
@@ -99,7 +99,7 @@ export default function EventDetailPage() {
               <CardContent><NumberGrid items={[
                 ["Contracted", usdCents(n.contracted)], ["Collected", usdCents(n.collected)], ["Refunds", usdCents(n.refunds)],
                 ["Net revenue", usdCents(n.netRevenue)], ["During launch", usdCents(n.cartOpenRevenue)], ["Sales team follow-up", usdCents(n.postCartRevenue)],
-                ["Orders", n.orders.toLocaleString()], ["Buyers", n.buyers.toLocaleString()], ["ROAS", roasText(n.roas)],
+                ["Orders", n.orders.toLocaleString()], ["Buyers", n.buyers.toLocaleString()],
               ]} /></CardContent>
             </Card>
 
