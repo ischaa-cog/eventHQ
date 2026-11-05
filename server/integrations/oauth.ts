@@ -107,7 +107,7 @@ export async function getGrant(id: number) {
 }
 
 async function saveGrant(input: {
-  provider: "meta" | "highlevel"; accountRef: string; displayName: string | null; source: "oauth" | "token" | "composio";
+  provider: "meta" | "highlevel"; accountRef: string; displayName: string | null; source: "oauth" | "token";
   credentials: unknown; expiresAt: Date | null; userId?: string | null;
 }) {
   const values = {
@@ -182,21 +182,11 @@ export async function metaGrantFromToken(accessToken: string, appSecret: string 
 }
 
 function metaGrantCreds(grant: OAuthGrant): MetaGrantCreds {
-  // A Facebook sign-in through Composio: Composio holds the token and adds it to each request.
-  if (grant.source === "composio") return { accessToken: "composio" };
   const stored = decryptJson<MetaGrantCreds>(grant.credentialsCiphertext);
   if (!stored?.accessToken) throw new Error("Meta login is unreadable; reconnect it in Integrations.");
   // Tokens from our own login are signed with our app secret; pasted tokens bring their own (or none).
   const appSecret = grant.source === "oauth" ? process.env.META_APP_SECRET : stored.appSecret;
   return { accessToken: stored.accessToken, appSecret };
-}
-
-// Requests for an agency login: through Composio for a Composio sign-in, direct otherwise.
-function grantFetch(grant: OAuthGrant, fetchImpl: typeof fetch): typeof fetch {
-  if (grant.source !== "composio") return fetchImpl;
-  const stored = decryptJson<{ composioAccountId?: string }>(grant.credentialsCiphertext);
-  if (!stored?.composioAccountId) throw new Error("This Facebook sign-in is unreadable; sign in again on Connect Accounts.");
-  return composioFetch(stored.composioAccountId, fetchImpl);
 }
 
 // --- HighLevel ---
@@ -294,7 +284,6 @@ export async function grantAccounts(grant: OAuthGrant, fetchImpl: typeof fetch =
   try {
     if (grant.provider === "meta") {
       const creds = metaGrantCreds(grant);
-      fetchImpl = grantFetch(grant, fetchImpl);
       const out: GrantAccount[] = [];
       let next: string | undefined = undefined;
       // business_name needs no extra permission on most tokens; drop it if this token cannot read it.
@@ -332,7 +321,7 @@ export async function grantAccounts(grant: OAuthGrant, fetchImpl: typeof fetch =
   }
 }
 
-// ---------- Sign-ins through Composio (Stripe, Meta) ----------
+// ---------- Stripe through Composio ----------
 
 async function composio(path: string, init: { method?: string; body?: unknown } = {}, fetchImpl: typeof fetch = fetch) {
   const key = process.env.COMPOSIO_API_KEY;
@@ -344,9 +333,9 @@ async function composio(path: string, init: { method?: string; body?: unknown } 
   }), "Composio");
 }
 
-// Composio's own sign-in apps ("managed auth"), one auth config per toolkit, made on first use.
+// Composio's own Stripe sign-in app ("managed auth"), made on first use.
 const authConfigs = new Map<string, string>();
-async function composioAuthConfigId(toolkit: "stripe" | "metaads", fetchImpl: typeof fetch) {
+async function composioAuthConfigId(toolkit: "stripe", fetchImpl: typeof fetch) {
   if (toolkit === "stripe" && process.env.COMPOSIO_STRIPE_AUTH_CONFIG_ID) return process.env.COMPOSIO_STRIPE_AUTH_CONFIG_ID;
   const cached = authConfigs.get(toolkit);
   if (cached) return cached;
@@ -361,10 +350,7 @@ async function composioAuthConfigId(toolkit: "stripe" | "metaads", fetchImpl: ty
 }
 
 export const composioUserId = (clientId: number) => `eventhq-client-${clientId}`;
-// Agency-wide sign-ins (Facebook) aren't tied to one workspace.
-export const COMPOSIO_AGENCY_USER = "eventhq-agency";
-
-async function composioLink(toolkit: "stripe" | "metaads", userId: string, state: string, fetchImpl: typeof fetch) {
+async function composioLink(toolkit: "stripe", userId: string, state: string, fetchImpl: typeof fetch) {
   const body = await composio("/connected_accounts/link", {
     method: "POST",
     body: { auth_config_id: await composioAuthConfigId(toolkit, fetchImpl), user_id: userId, callback_url: `${composioCallbackUri()}?state=${encodeURIComponent(state)}` },
@@ -378,15 +364,9 @@ export async function composioStripeLink(clientId: number, returnTo: string, fet
   return composioLink("stripe", composioUserId(clientId), signToken({ k: "composio", c: clientId, r: returnTo }, 30 * 60_000), fetchImpl);
 }
 
-// Starts an agency Facebook sign-in; every ad account that person can see becomes pickable.
-export async function composioMetaLink(returnTo: string, adminUserId: string, fetchImpl: typeof fetch = fetch) {
-  return composioLink("metaads", COMPOSIO_AGENCY_USER, signToken({ k: "composio", c: 0, r: returnTo, t: "metaads", u: adminUserId }, 30 * 60_000), fetchImpl);
-}
-
 export function readComposioState(state: string) {
-  const value = readToken<{ c: number; r: string; t?: string; u?: string }>(state, "composio");
-  if (!value || !Number.isInteger(value.c)) return null;
-  return { clientId: value.c, returnTo: String(value.r || "/"), toolkit: value.t === "metaads" ? "metaads" as const : "stripe" as const, adminUserId: value.u ?? null };
+  const value = readToken<{ c: number; r: string }>(state, "composio");
+  return value && Number.isInteger(value.c) ? { clientId: value.c, returnTo: String(value.r || "/") } : null;
 }
 
 // The Composio connected account for a finished sign-in, checked to be active, for this toolkit and owner.
@@ -412,17 +392,7 @@ export async function composioFinish(input: { clientId: number; connectedAccount
   return { composioAccountId: id, stripeAccountId: String(stripe.id ?? id), displayName: name as string | null };
 }
 
-// Saves a finished Facebook sign-in as an agency Meta login.
-export async function composioMetaFinish(input: { connectedAccountId?: string; sessionUri?: string; adminUserId?: string | null }, fetchImpl: typeof fetch = fetch) {
-  const id = await finishedAccount({ ...input, userId: COMPOSIO_AGENCY_USER, toolkit: "metaads", label: "Facebook" }, fetchImpl);
-  const me = await readJson(await composioFetch(id, fetchImpl)(`${META_GRAPH}/me?fields=id,name`), "Meta");
-  return saveGrant({
-    provider: "meta", accountRef: `composio-${me.id}`, displayName: me.name ? `${me.name} (Facebook sign-in)` : "Facebook sign-in",
-    source: "composio", credentials: { composioAccountId: id }, expiresAt: null, userId: input.adminUserId ?? null,
-  });
-}
-
-// A fetch() that sends GET requests through Composio, which adds the sign-in (Stripe, Meta).
+// A fetch() that sends GET requests through Composio, which adds the Stripe login.
 export function composioFetch(connectedAccountId: string, fetchImpl: typeof fetch = fetch): typeof fetch {
   return (async (input: any) => {
     const url = new URL(typeof input === "string" ? input : input.url ?? String(input));
@@ -452,8 +422,7 @@ export async function connectionAuth(connection: IntegrationConnection, fetchImp
       if (grant.provider === "meta") {
         if (grant.expiresAt && grant.expiresAt.getTime() < Date.now()) throw new Error("The Meta login expired; log in again in Integrations.");
         const { accessToken, appSecret } = metaGrantCreds(grant);
-        const viaComposio = grant.source === "composio" ? { fetchImpl: grantFetch(grant, fetchImpl) } : {};
-        return { creds: { accessToken, ...(appSecret ? { appSecret } : {}) }, ...viaComposio };
+        return { creds: { accessToken, ...(appSecret ? { appSecret } : {}) } };
       }
       if (grant.provider === "highlevel") {
         return { creds: { apiKey: await highlevelLocationToken(grant, connection.externalAccountId, fetchImpl) } };

@@ -22,7 +22,7 @@ type Provider = "meta" | "stripe" | "whop" | "fanbasis" | "highlevel";
 type Connection = { id: number; provider: Provider; displayName: string | null; externalAccountId: string; status: string; lastSyncAt: string | null; lastError: string | null };
 type HubClient = { id: number; name: string; isActive: boolean; connections: Connection[] };
 type Grant = { id: number; provider: string; displayName: string | null; status: string; source: string; lastError: string | null };
-type Hub = { composio: boolean; grants: Grant[]; clients: HubClient[] };
+type Hub = { composio: boolean; metaSignIn: boolean; grants: Grant[]; clients: HubClient[] };
 type Account = { id: string; name: string; detail: string | null; connectedTo: { clientId: number; clientName: string }[]; grantId: number };
 
 const PROVIDERS: Array<{ id: Provider; name: string; kind: "ads" | "sales" | "optins" }> = [
@@ -57,7 +57,7 @@ export default function ConnectAccountsPage() {
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     if (q.get("oauth") === "connected") {
-      toast({ title: q.get("provider") === "meta" ? "Facebook connected" : "Stripe connected", description: q.get("provider") === "meta" ? "Now add each client's ad accounts with + Meta Ads." : "The first sales arrive in a few minutes." });
+      toast({ title: q.get("provider") === "meta" ? "Facebook connected" : "Stripe connected", description: q.get("provider") === "meta" ? "Now add each client's ad accounts with Connect under Meta Ads." : "The first sales arrive in a few minutes." });
     } else if (q.get("oauth_error")) {
       toast({ title: "Sign-in didn't finish", description: q.get("oauth_error") ?? "", variant: "destructive" });
     }
@@ -84,11 +84,9 @@ export default function ConnectAccountsPage() {
   const inactiveCount = clients.length - active.length;
   const metaGrants = (hub.data?.grants ?? []).filter((g) => g.provider === "meta");
 
-  const facebook = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/oauth/meta/composio-start", { returnTo: "/connect-accounts" })).json() as Promise<{ url: string }>,
-    onSuccess: ({ url }) => { window.location.href = url; },
-    onError: (e) => toast({ title: "Couldn't start the Facebook sign-in", description: errorText(e), variant: "destructive" }),
-  });
+  // eventHQ's own Facebook sign-in (needs META_APP_ID / META_APP_SECRET); the system user otherwise.
+  const facebook = () => { window.location.href = "/api/oauth/meta/start?returnTo=/connect-accounts"; };
+  const systemUser = metaGrants.find((g) => g.source === "token")?.displayName ?? "the eventHQ system user";
 
   return (
     <AppLayout title="Connect Accounts" mode="agency">
@@ -100,20 +98,23 @@ export default function ConnectAccountsPage() {
 
         <Card className="rounded-xl">
           <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-1">
               <p className="font-medium">Meta ad accounts</p>
-              <p className="text-sm text-muted-foreground">
-                One Facebook sign-in covers every ad account that person can see.
-                {metaGrants.length > 0 && <> Connected: {metaGrants.map((g) => g.displayName ?? "Meta login").join(", ")}.</>}
-              </p>
+              {hub.data?.metaSignIn ? (
+                <p className="text-sm text-muted-foreground">One Facebook sign-in covers every ad account that person can see.</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Every ad account shared with <span className="text-foreground">{systemUser}</span> can be picked for any client.
+                  To share one that isn't listed: Meta Business Settings → Users → System users → {systemUser} → Assign assets → Ad accounts → tick them → View performance.
+                </p>
+              )}
               {metaGrants.some((g) => g.status === "error") && (
-                <p className="mt-1 text-sm text-destructive">A Meta login stopped working: {metaGrants.find((g) => g.status === "error")?.lastError}</p>
+                <p className="text-sm text-destructive">A Meta login stopped working: {metaGrants.find((g) => g.status === "error")?.lastError}</p>
               )}
             </div>
-            <Button className="h-11 shrink-0" onClick={() => facebook.mutate()} disabled={!hub.data?.composio || facebook.isPending} data-testid="button-facebook-signin">
-              {facebook.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {metaGrants.some((g) => g.source === "composio") ? "Sign in with another Facebook" : "Sign in with Facebook"}
-            </Button>
+            {hub.data?.metaSignIn && (
+              <Button className="h-11 shrink-0" onClick={facebook} data-testid="button-facebook-signin">Sign in with Facebook</Button>
+            )}
           </CardContent>
         </Card>
 
@@ -156,7 +157,7 @@ export default function ConnectAccountsPage() {
       <Dialog open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           {open && (open.provider === "meta"
-            ? <MetaPicker client={open.client} grants={metaGrants} composio={!!hub.data?.composio} onFacebook={() => facebook.mutate()} onDone={() => { setOpen(null); queryClient.invalidateQueries({ queryKey: ["/api/connect-hub"] }); }} />
+            ? <MetaPicker client={open.client} grants={metaGrants} metaSignIn={!!hub.data?.metaSignIn} systemUser={systemUser} onFacebook={facebook} onDone={() => { setOpen(null); queryClient.invalidateQueries({ queryKey: ["/api/connect-hub"] }); }} />
             : <KeyOrSignIn client={open.client} provider={open.provider} composio={!!hub.data?.composio} onDone={() => { setOpen(null); queryClient.invalidateQueries({ queryKey: ["/api/connect-hub"] }); }} />)}
         </DialogContent>
       </Dialog>
@@ -209,7 +210,7 @@ function ClientCard({ client, gaps, onAdd, onOpen }: { client: HubClient; gaps: 
   );
 }
 
-function MetaPicker({ client, grants, composio, onFacebook, onDone }: { client: HubClient; grants: Grant[]; composio: boolean; onFacebook: () => void; onDone: () => void }) {
+function MetaPicker({ client, grants, metaSignIn, systemUser, onFacebook, onDone }: { client: HubClient; grants: Grant[]; metaSignIn: boolean; systemUser: string; onFacebook: () => void; onDone: () => void }) {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const usable = grants.filter((g) => g.status !== "error");
@@ -244,8 +245,8 @@ function MetaPicker({ client, grants, composio, onFacebook, onDone }: { client: 
       </DialogHeader>
       {usable.length === 0 ? (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">No Meta login is connected yet. Sign in with a Facebook account that can see this client's ad account.</p>
-          <Button className="h-11 w-full" onClick={onFacebook} disabled={!composio}>Sign in with Facebook</Button>
+          <p className="text-sm text-muted-foreground">No Meta login is connected yet. An admin adds one under Integrations → Agency logins.</p>
+          {metaSignIn && <Button className="h-11 w-full" onClick={onFacebook}>Sign in with Facebook</Button>}
         </div>
       ) : (
         <div className="space-y-3">
@@ -279,7 +280,8 @@ function MetaPicker({ client, grants, composio, onFacebook, onDone }: { client: 
             </ul>
           )}
           <p className="text-xs text-muted-foreground">
-            Don't see it? <button type="button" className="underline" onClick={onFacebook} disabled={!composio}>Sign in with a Facebook account</button> that can see it, or share it with the eventHQ system user in Meta Business Settings.
+            Don't see it? In Meta Business Settings → System users → {systemUser} → Assign assets, tick the ad account with View performance, then reopen this list.
+            {metaSignIn && <> Or <button type="button" className="underline" onClick={onFacebook}>sign in with a Facebook account</button> that can see it.</>}
           </p>
         </div>
       )}
