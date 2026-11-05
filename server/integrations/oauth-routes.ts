@@ -3,7 +3,7 @@
 import type { Express, Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { clients, integrationConnections, oauthGrants, type User } from "@shared/schema";
 import { db } from "../storage";
 import { isAuthenticated } from "../auth";
@@ -12,8 +12,9 @@ import { countAttempt } from "../rate-limit";
 import { saveConnection, toPublic } from "./connections";
 import { webhookUrlFor } from "./routes";
 import { kickSync } from "./kick";
+import { hasFullAccess } from "@shared/roles";
 import {
-  composioFinish, composioStripeLink, connectLinkToken, CONNECT_LINK_TTL, getGrant, grantAccounts, grantToPublic,
+  composioFinish, composioMetaFinish, composioMetaLink, composioStripeLink, connectLinkToken, CONNECT_LINK_TTL, getGrant, grantAccounts, grantToPublic,
   highlevelAuthorizeUrl, highlevelGrantFromCode, listGrants, metaAuthorizeUrl, metaGrantFromCode, metaGrantFromToken,
   oauthConfig, readComposioState, readConnectLink,
 } from "./oauth";
@@ -34,7 +35,7 @@ const withQuery = (path: string, params: Record<string, string>) => {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 const saveSession = (req: any) => new Promise<void>((resolve, reject) => req.session.save((err: any) => (err ? reject(err) : resolve())));
 
-async function testKey(provider: "whop" | "fanbasis" | "stripe", apiKey: string): Promise<{ externalAccountId: string; displayName: string | null; credentials: Record<string, string> }> {
+async function testKey(provider: "whop" | "fanbasis" | "stripe" | "highlevel", apiKey: string, accountId = ""): Promise<{ externalAccountId: string; displayName: string | null; credentials: Record<string, string> }> {
   const get = async (url: string, headers: Record<string, string>, label: string) => {
     const res = await fetch(url, { headers });
     const text = await res.text();
@@ -50,6 +51,12 @@ async function testKey(provider: "whop" | "fanbasis" | "stripe", apiKey: string)
     await get(`https://api.whop.com/api/v1/payments?company_id=${encodeURIComponent(company.id)}&first=1`, { Authorization: `Bearer ${apiKey}` },
       "Whop (the key needs payment read permission)");
     return { externalAccountId: String(company.id), displayName: (company.title ?? company.name ?? null) as string | null, credentials: { apiKey } };
+  }
+  if (provider === "highlevel") {
+    if (!/^[A-Za-z0-9]{10,40}$/.test(accountId)) throw new Error("Add the sub-account's Location ID (Settings → Business Profile).");
+    await get(`https://services.leadconnectorhq.com/forms/?locationId=${encodeURIComponent(accountId)}&limit=1`,
+      { Authorization: `Bearer ${apiKey}`, Version: "2021-07-28", Accept: "application/json" }, "HighLevel (the token needs forms read access for this sub-account)");
+    return { externalAccountId: accountId, displayName: "HighLevel opt-ins", credentials: { apiKey } };
   }
   if (provider === "fanbasis") {
     await get("https://www.fanbasis.com/public-api/checkout-sessions/transactions?per_page=1", { "x-api-key": apiKey, Accept: "application/json" }, "Fanbasis");
@@ -203,15 +210,25 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
   // workspace it is for, and Composio confirms the account belongs to that workspace.
   app.get("/api/oauth/composio/callback", async (req, res) => {
     const state = readComposioState(String(req.query.state ?? ""));
-    if (!state) return res.redirect("/?oauth_error=" + encodeURIComponent("The Stripe sign-in link expired. Try again."));
+    if (!state) return res.redirect("/?oauth_error=" + encodeURIComponent("The sign-in link expired. Try again."));
     const returnTo = safePath(state.returnTo);
     const isConnectPage = returnTo.startsWith("/connect/");
     const fail = (text: string) => res.redirect(withQuery(returnTo, isConnectPage ? { error: text } : { oauth_error: text }));
-    if (req.query.status && String(req.query.status).toLowerCase() !== "success") return fail("Stripe sign-in was cancelled.");
+    const label = state.toolkit === "metaads" ? "Facebook" : "Stripe";
+    if (req.query.status && String(req.query.status).toLowerCase() !== "success") return fail(`${label} sign-in was cancelled.`);
+    const connectedAccountId = (req.query.connected_account_id ?? req.query.connectedAccountId) as string | undefined;
+    if (state.toolkit === "metaads") {
+      try {
+        const grant = await composioMetaFinish({ connectedAccountId, sessionUri: req.query.session_uri as string | undefined, adminUserId: state.adminUserId });
+        return res.redirect(withQuery(returnTo, { oauth: "connected", provider: "meta", grant: String(grant.id) }));
+      } catch (error) {
+        return fail(message(error));
+      }
+    }
     try {
       const done = await composioFinish({
         clientId: state.clientId,
-        connectedAccountId: (req.query.connected_account_id ?? req.query.connectedAccountId) as string | undefined,
+        connectedAccountId,
         sessionUri: req.query.session_uri as string | undefined,
       });
       const row = await saveConnection({
@@ -223,6 +240,58 @@ export function registerOAuthRoutes(app: Express, getRequestUser: GetUser) {
     } catch (error) {
       fail(message(error));
     }
+  });
+
+  app.post("/api/oauth/meta/composio-start", isAuthenticated, async (req, res) => {
+    const user = await requireAdmin(req, res);
+    if (!user) return;
+    try {
+      res.json(await composioMetaLink(safePath(req.body?.returnTo, "/connect-accounts"), user.id));
+    } catch (error) {
+      res.status(502).json({ error: message(error) });
+    }
+  });
+
+  // A pasted key, checked against the provider before it is saved (Connect Accounts page).
+  app.post("/api/clients/:clientId/integrations/key", isAuthenticated, async (req, res) => {
+    if (!await requireAdmin(req, res)) return;
+    const parsed = z.object({
+      provider: z.enum(["whop", "fanbasis", "stripe", "highlevel"]),
+      apiKey: z.string().trim().min(8).max(4000),
+      accountId: z.string().trim().max(200).optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Paste the full key." });
+    const clientId = Number(req.params.clientId);
+    const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.id, clientId));
+    if (!client) return res.status(404).json({ error: "Workspace not found" });
+    try {
+      const tested = await testKey(parsed.data.provider, parsed.data.apiKey, parsed.data.accountId ?? "");
+      const row = await saveConnection({ clientId, provider: parsed.data.provider, ...tested, grantId: null });
+      await kickSync(row.id);
+      res.json(toPublic(row));
+    } catch (error) {
+      res.status(400).json({ error: message(error) });
+    }
+  });
+
+  // Every workspace and what each has connected, for the Connect Accounts page.
+  app.get("/api/connect-hub", isAuthenticated, async (req, res) => {
+    const user = await requireAdmin(req, res);
+    if (!user) return;
+    if (!hasFullAccess(user)) return res.status(403).json({ error: "Only admins can manage integrations." });
+    const [rows, conns, grants] = await Promise.all([
+      db.select({ id: clients.id, name: clients.name, isActive: clients.isActive }).from(clients).orderBy(asc(clients.name)),
+      db.select().from(integrationConnections),
+      listGrants(),
+    ]);
+    res.json({
+      composio: oauthConfig().composio.configured,
+      grants: grants.map(grantToPublic),
+      clients: rows.map((c) => ({
+        ...c,
+        connections: conns.filter((x) => x.clientId === c.id).map(toPublic),
+      })),
+    });
   });
 
   // ---------- Client connect link ----------

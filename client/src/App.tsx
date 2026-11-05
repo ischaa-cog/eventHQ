@@ -29,6 +29,7 @@ const ClientOnboardingPage = lazy(() => import("@/pages/client-onboarding"));
 import AccessDeniedPage from "@/pages/access-denied";
 const LiveSalesFeedPage = lazy(() => import("@/pages/live-sales-feed"));
 const TalkToNeoPage = lazy(() => import("@/pages/talk-to-neo"));
+const ConnectAccountsPage = lazy(() => import("@/pages/connect-accounts"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const MoneyDashboardPage = lazy(() => import("@/pages/money-dashboard"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations"));
@@ -227,6 +228,7 @@ function Router() {
       {/* Client-first overview and workspace selection */}
       <Route path="/" component={user?.role === "agency_client" ? ClientStart : DashboardPage} />
       <Route path="/clients" component={() => <InternalOnlyFeature><ClientsPage /></InternalOnlyFeature>} />
+      <Route path="/connect-accounts" component={() => <AdminOnlyFeature><ConnectAccountsPage /></AdminOnlyFeature>} />
       <Route path="/notifications" component={() => <InternalOnlyFeature><NotificationsPage /></InternalOnlyFeature>} />
       <Route path="/send-notifications" component={() => <AdminOnlyFeature><SendNotificationsPage /></AdminOnlyFeature>} />
       <Route path="/neo-knowledge" component={() => <AdminOnlyFeature><NeoKnowledgePage /></AdminOnlyFeature>} />
